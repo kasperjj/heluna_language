@@ -1,0 +1,29 @@
+# Tests the forbid field-ref rule (non-tagged variant: forbid input.field in output)
+
+contract forbid-field-rule
+  input
+    secret-key as string,
+    label as string
+  end
+
+  output
+    label as string
+  end
+
+  rules
+    forbid input.secret-key in output
+  end
+
+  tests
+    test "secret excluded"
+      given { secret-key: "sk-123", label: "prod" }
+      expect { label: "prod" }
+    end
+  end
+end
+
+define forbid-field-rule with input
+  result {
+    label: $label
+  }
+end

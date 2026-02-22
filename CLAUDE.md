@@ -17,19 +17,21 @@ make test         # Build and run all tests
 make clean        # Remove build/ and bin/
 ```
 
-The only implemented tool so far: `bin/heluna-lex test/samples/full-name.heluna`
+Implemented tools: `bin/heluna-lex` (tokenizer) and `bin/heluna-parse` (parser + AST printer).
 
 ## Architecture
 
 The toolchain is written in C11 (`-Wall -Wextra -Wpedantic`) and builds a static library (`build/libheluna.a`) that CLI tools link against.
 
-**Pipeline (planned):** source → lexer → parser → type checker → evaluator
+**Pipeline:** source → lexer → parser → type checker (planned) → evaluator (planned)
 
 ### Core library (`src/` → `build/libheluna.a`)
 
 - **arena.c** — Bump allocator (64KB blocks, 8-byte aligned). Never returns NULL; aborts on OOM. All allocations freed at once via `arena_destroy()`.
-- **lexer.c** — Single-pass tokenizer. Produces a stream of `Token` structs with source location tracking. Supports `lexer_next()` and `lexer_peek()` for lookahead. Handles keywords (~48), literals, input references (`$field-name`), and `#` comments.
-- **token.c** — Token kind enum (78 variants) and human-readable name lookup.
+- **lexer.c** — Single-pass tokenizer. Produces a stream of `Token` structs with source location tracking. Supports `lexer_next()` and `lexer_peek()` for lookahead. Handles keywords (49), literals, input references (`$field-name`), and `#` comments.
+- **token.c** — Token kind enum (80 variants) and human-readable name lookup.
+- **parser.c** — Recursive-descent parser. Consumes token stream from the lexer and builds a typed AST (`AstProgram`). Handles full Heluna grammar: contracts (with tags, sanitizers, rules, tests), function definitions, expressions, patterns, and types.
+- **ast.c** — AST pretty-printer (`ast_print()`). Outputs S-expression representation of a parsed program.
 - **errors.c** — Structured error reporting with source location (filename:line:col). Error kinds: SYNTAX, TYPE, CONTRACT, RUNTIME, TAG, IO.
 
 ### Headers (`include/heluna/`)
@@ -38,11 +40,17 @@ Public API for the library. Each `.c` file has a corresponding header.
 
 ### CLI tools (`tools/`)
 
-One `.c` file per tool, linked against `libheluna.a`. Only `heluna-lex` is implemented. The others (`heluna-parse`, `heluna-check`, `heluna-run`, `heluna-test`) are stubs.
+One `.c` file per tool, linked against `libheluna.a`. `heluna-lex` and `heluna-parse` are implemented. The others (`heluna-check`, `heluna-run`, `heluna-test`) are stubs.
 
 ### Tests (`test/`)
 
-Test binaries are built to `build/test/` and run sequentially by `make test`. Currently only `test_lexer.c` exists (4 test functions covering keywords, literals, input refs, and operators). Sample `.heluna` files live in `test/samples/`.
+Test binaries are built to `build/test/` and run sequentially by `make test`. Test files:
+- **test_lexer.c** — Unit tests (keywords, literals, input refs, operators).
+- **test_lex_samples.c** — Golden-file integration tests: lexes every sample and compares against `test/expected/*.tokens`.
+- **test_parser.c** — Unit tests for the parser (~40 test functions covering expressions, operators, precedence, patterns, types, contract sections, rules, and error cases).
+- **test_parse_samples.c** — Integration tests: parses every `.heluna` sample and asserts no errors.
+
+Sample `.heluna` files live in `test/samples/`.
 
 ## Language Reference
 

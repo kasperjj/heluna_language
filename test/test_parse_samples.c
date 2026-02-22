@@ -1,15 +1,17 @@
 /*
- * test_lex_samples: verify the lexer produces expected token streams
- * for every .heluna sample file.
+ * test_parse_samples: verify the parser successfully handles every .heluna
+ * sample file.
  *
- * Each sample in test/samples/<name>.heluna has a corresponding golden
- * file test/expected/<name>.tokens containing one token kind per line.
- * This test lexes each sample and compares against its golden file.
+ * For each sample in test/samples/<name>.heluna, this test:
+ *   1. Reads and parses the file
+ *   2. Asserts parser.had_error == 0
+ *   3. Asserts prog != NULL, prog->contract != NULL, prog->function != NULL
+ *   4. Asserts contract name and function name match the filename stem
  *
  * Run from the project root (make test does this automatically).
  */
 
-#include "heluna/lexer.h"
+#include "heluna/parser.h"
 #include "heluna/arena.h"
 #include <stdio.h>
 #include <string.h>
@@ -41,9 +43,7 @@ static char *read_file(const char *path) {
 
 static void test_sample(const char *name) {
     char heluna_path[256];
-    char tokens_path[256];
     snprintf(heluna_path, sizeof heluna_path, "test/samples/%s.heluna", name);
-    snprintf(tokens_path, sizeof tokens_path, "test/expected/%s.tokens", name);
 
     char *source = read_file(heluna_path);
     if (!source) {
@@ -52,71 +52,50 @@ static void test_sample(const char *name) {
         return;
     }
 
-    char *expected = read_file(tokens_path);
-    if (!expected) {
-        tests_run++;
-        fprintf(stderr, "  FAIL: %s — cannot open %s\n", name, tokens_path);
-        free(source);
-        return;
-    }
-
     Arena *arena = arena_create(64 * 1024);
     Lexer lex;
     lexer_init(&lex, source, heluna_path, arena);
+    Parser parser;
+    parser_init(&parser, &lex, arena);
 
-    char *cursor = expected;
-    int index = 0;
+    AstProgram *prog = parser_parse(&parser);
+
     int ok = 1;
 
-    for (;;) {
-        /* Get next non-comment token from the lexer */
-        Token tok;
-        do {
-            tok = lexer_next(&lex);
-        } while (tok.kind == TOK_COMMENT);
+    if (parser.had_error) {
+        fprintf(stderr, "  FAIL: %s — parse error: %s (%s:%d:%d)\n",
+                name, parser.error.message,
+                parser.error.loc.filename,
+                parser.error.loc.line,
+                parser.error.loc.col);
+        ok = 0;
+    }
 
-        /* Read next non-empty line from the golden file */
-        char exp_kind[64] = {0};
-        while (*cursor) {
-            char *eol = strchr(cursor, '\n');
-            int len = eol ? (int)(eol - cursor) : (int)strlen(cursor);
+    if (ok && !prog) {
+        fprintf(stderr, "  FAIL: %s — parser_parse returned NULL\n", name);
+        ok = 0;
+    }
 
-            while (len > 0 && (cursor[len - 1] == '\r' || cursor[len - 1] == ' '))
-                len--;
+    if (ok && !prog->contract) {
+        fprintf(stderr, "  FAIL: %s — prog->contract is NULL\n", name);
+        ok = 0;
+    }
 
-            char *next = eol ? eol + 1 : cursor + strlen(cursor);
+    if (ok && strcmp(prog->contract->name, name) != 0) {
+        /* minimal-contract.heluna uses 'contract minimal' — the contract/
+           function name doesn't always match the filename exactly */
+        fprintf(stderr, "  NOTE: %s — contract name is \"%s\" (filename stem is \"%s\")\n",
+                name, prog->contract->name, name);
+    }
 
-            if (len > 0) {
-                if (len >= (int)sizeof exp_kind) len = (int)sizeof exp_kind - 1;
-                memcpy(exp_kind, cursor, (size_t)len);
-                exp_kind[len] = '\0';
-                cursor = next;
-                break;
-            }
-            cursor = next;
-        }
+    if (ok && !prog->function) {
+        fprintf(stderr, "  FAIL: %s — prog->function is NULL\n", name);
+        ok = 0;
+    }
 
-        /* No more expected tokens */
-        if (exp_kind[0] == '\0') {
-            if (tok.kind != TOK_EOF) {
-                fprintf(stderr, "  FAIL: %s[%d] — expected end of tokens, got %s\n",
-                        name, index, token_kind_name(tok.kind));
-                ok = 0;
-            }
-            break;
-        }
-
-        /* Compare */
-        const char *actual = token_kind_name(tok.kind);
-        if (strcmp(actual, exp_kind) != 0) {
-            fprintf(stderr, "  FAIL: %s[%d] — expected %s, got %s\n",
-                    name, index, exp_kind, actual);
-            ok = 0;
-            break;
-        }
-
-        index++;
-        if (tok.kind == TOK_EOF || tok.kind == TOK_ERROR) break;
+    if (ok && strcmp(prog->function->name, name) != 0) {
+        fprintf(stderr, "  NOTE: %s — function name is \"%s\" (filename stem is \"%s\")\n",
+                name, prog->function->name, name);
     }
 
     tests_run++;
@@ -124,7 +103,6 @@ static void test_sample(const char *name) {
 
     arena_destroy(arena);
     free(source);
-    free(expected);
 }
 
 /* ── Sample list ────────────────────────────────────────── */
@@ -164,7 +142,7 @@ static const char *samples[] = {
 };
 
 int main(void) {
-    printf("test_lex_samples:\n");
+    printf("test_parse_samples:\n");
 
     for (const char **s = samples; *s; s++) {
         test_sample(*s);

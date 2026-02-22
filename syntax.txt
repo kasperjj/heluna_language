@@ -1,3 +1,11 @@
+(*
+ * Heluna — Formal Grammar (EBNF)
+ *
+ * This grammar reflects the actual parser implementation in src/parser.c.
+ *)
+
+(* ── Lexical elements ──────────────────────────────────────── *)
+
 Literal       ::= Integer | Float | String | Boolean | Nothing
 Boolean       ::= 'true' | 'false'
 Nothing       ::= 'nothing'
@@ -7,46 +15,75 @@ String        ::= '"' Character* '"'
 Comment       ::= '#' (any character until end of line)
 Identifier    ::= Letter (Letter | Digit | '-')*
 
+(* Names: identifiers and keywords are interchangeable in label/field positions *)
+Name          ::= Identifier | Keyword
+Keyword       ::= 'contract' | 'uses' | 'tags' | 'tagged' | 'sanitizers'
+                 | 'strips' | 'input' | 'output' | 'rules' | 'forbid'
+                 | 'require' | 'reject' | 'tests' | 'test' | 'given'
+                 | 'expect' | 'as' | 'string' | 'integer' | 'float'
+                 | 'boolean' | 'maybe' | 'list' | 'of' | 'record'
+                 | 'define' | 'with' | 'let' | 'be' | 'result' | 'if'
+                 | 'then' | 'else' | 'end' | 'match' | 'when' | 'between'
+                 | 'and' | 'or' | 'not' | 'in' | 'through' | 'map' | 'do'
+                 | 'filter' | 'where' | 'true' | 'false' | 'nothing'
+
+(* ── Types ─────────────────────────────────────────────────── *)
+
 Type          ::= BaseType | MaybeType | ListType | RecordType
 BaseType      ::= 'string' | 'integer' | 'float' | 'boolean'
 MaybeType     ::= 'maybe' Type
 ListType      ::= 'list' 'of' Type
 RecordType    ::= 'record' FieldDecl (',' FieldDecl)* 'end'
-FieldDecl     ::= Identifier 'as' Type
+FieldDecl     ::= Name 'as' Type ('tagged' Identifier+)?
 
-Expression    ::= MatchExpr | IfExpr | LetExpr | FilterExpr
+(* ── Expressions ───────────────────────────────────────────── *)
+
+Expression    ::= LetExpr | IfExpr | MatchExpr | FilterExpr
                  | MapExpr | ThroughExpr
 
-ThroughExpr   ::= CompareExpr ('through' (FunctionCall | FilterExpr | MapExpr))*
+(* Precedence (lowest to highest):
+ *   through  <  or  <  and  <  not  <  compare  <  add/sub  <  mul/div/mod  <  unary neg  <  atom
+ *)
+
+ThroughExpr   ::= OrExpr ('through' (FunctionCall | FilterExpr | MapExpr))*
+
+OrExpr        ::= AndExpr ('or' AndExpr)*
+AndExpr       ::= NotExpr ('and' NotExpr)*
+NotExpr       ::= 'not' NotExpr | CompareExpr
 
 CompareExpr   ::= ArithExpr (CompareOp ArithExpr)?
 CompareOp     ::= '=' | '!=' | '<' | '>' | '<=' | '>='
 
 ArithExpr     ::= Term (('+' | '-') Term)*
 Term          ::= Unary (('*' | '/' | '%') Unary)*
-Unary         ::= '-'? Atom
+Unary         ::= '-' Unary | Atom
 
-Atom          ::= Literal
+Atom          ::= Literal Accessor*
                | Identifier Accessor*
+               | ('input' | 'output') Accessor*
                | '$' Identifier Accessor*
                | FunctionCall Accessor*
                | ListLiteral Accessor*
                | RecordLiteral Accessor*
-               | '(' Expression ')'
+               | '(' Expression ')' Accessor*
 
-Accessor      ::= '.' (Identifier | Integer)
+Accessor      ::= '.' (Identifier | Integer | Keyword)
 
 ListLiteral   ::= '[' (Expression (',' Expression)*)? ']'
 RecordLiteral ::= '{' (Label (',' Label)*)? '}'
-Label         ::= Identifier ':' Expression
+Label         ::= Name ':' Expression
+
+(* BoolExpr — used in if conditions, filter predicates, require rules, guards *)
+BoolExpr      ::= OrExpr
+
+(* ── If expression ─────────────────────────────────────────── *)
 
 IfExpr        ::= 'if' BoolExpr 'then' Expression
                    ('else' 'if' BoolExpr 'then' Expression)*
                    'else' Expression
                    'end'
 
-BoolExpr      ::= CompareExpr (('and' | 'or') CompareExpr)*
-               | 'not' BoolExpr
+(* ── Match expression ──────────────────────────────────────── *)
 
 MatchExpr     ::= 'match' Expression
                    WhenClause+
@@ -55,46 +92,45 @@ MatchExpr     ::= 'match' Expression
 
 WhenClause    ::= 'when' Pattern ('and' Guard)? 'then' Expression
 
+Guard         ::= BoolExpr
+
+(* ── Patterns ──────────────────────────────────────────────── *)
+
 Pattern       ::= LiteralPattern
-               | TypePattern
                | ListPattern
                | RecordPattern
                | RangePattern
-               | BindingPattern
                | WildcardPattern
+               | BindingPattern
 
-LiteralPattern   ::= Literal
-TypePattern      ::= Type
+LiteralPattern   ::= Literal | '-' (Integer | Float)
 ListPattern      ::= '[' (Pattern (',' Pattern)* (',' '..' Identifier?)?)? ']'
-RecordPattern    ::= '{' FieldPattern (',' FieldPattern)* '}'
-FieldPattern     ::= Identifier ':' Pattern
-RangePattern     ::= 'between' Expression 'and' Expression
+RecordPattern    ::= '{' (FieldPattern (',' FieldPattern)*)? '}'
+FieldPattern     ::= Name ':' Pattern
+RangePattern     ::= 'between' CompareExpr 'and' CompareExpr
 BindingPattern   ::= Identifier
 WildcardPattern  ::= '_'
 
-Guard            ::= BoolExpr
+(* ── Let / Filter / Map ────────────────────────────────────── *)
 
 LetExpr       ::= 'let' Identifier 'be' Expression
-                   (LetExpr | Expression)
 
 FilterExpr    ::= 'filter' Expression 'where' Identifier BoolExpr 'end'
 
 MapExpr       ::= 'map' Expression 'as' Identifier 'do' Expression 'end'
 
-ThroughExpr   ::= Expression ('through' (FunctionCall | FilterExpr | MapExpr))*
+(* ── Function definition ───────────────────────────────────── *)
 
 FunctionDef   ::= 'define' Identifier 'with' 'input'
-                   Expression
+                   LetBinding*
                    'result' Expression
                    'end'
 
+LetBinding    ::= 'let' Identifier 'be' Expression
+
 FunctionCall  ::= Identifier '(' RecordLiteral ')'
 
-TagDecl       ::= 'tags' TagDef (',' TagDef)* 'end'
-TagDef        ::= Identifier String?
-
-SanitizerDecl  ::= 'sanitizers' SanitizerDef+ 'end'
-SanitizerDef   ::= Identifier 'strips' Identifier+ (',' SanitizerDef)*
+(* ── Contract ──────────────────────────────────────────────── *)
 
 Contract       ::= 'contract' Identifier
                     UsesDecl?
@@ -106,26 +142,34 @@ Contract       ::= 'contract' Identifier
                     TestList?
                     'end'
 
-ForbidRule     ::= 'forbid' FieldRef 'in' 'output'
-                | 'forbid' 'tagged' Identifier 'in' 'output'
-
 UsesDecl      ::= 'uses' Identifier (',' Identifier)*
+
+TagDecl       ::= 'tags' TagDef (',' TagDef)* 'end'
+TagDef        ::= Identifier String?
+
+SanitizerDecl  ::= 'sanitizers' SanitizerDef+ 'end'
+SanitizerDef   ::= Identifier 'strips' Identifier+
+
 InputSpec     ::= 'input' FieldDecl (',' FieldDecl)* 'end'
 OutputSpec    ::= 'output' FieldDecl (',' FieldDecl)* 'end'
 
 RuleList      ::= 'rules' Rule+ 'end'
-
 Rule          ::= ForbidRule | RequireRule | MatchRule
 
 ForbidRule    ::= 'forbid' FieldRef 'in' 'output'
+               | 'forbid' 'tagged' Identifier 'in' 'output'
+
 RequireRule   ::= 'require' FieldRef BoolExpr
                    ('else' 'reject' String)? 'end'
+
 MatchRule     ::= 'match' FieldRef
-                   WhenClause+
+                   RuleWhenClause+
                    ('else' 'reject' String)?
                    'end'
 
-FieldRef      ::= ('input' | 'output') Accessor+
+RuleWhenClause ::= 'when' Pattern ('and' Guard)? 'then' Expression
+
+FieldRef      ::= ('input' | 'output') Accessor*
 
 TestList      ::= 'tests' TestCase+ 'end'
 
@@ -133,3 +177,7 @@ TestCase      ::= 'test' String
                    'given' RecordLiteral
                    'expect' RecordLiteral
                    'end'
+
+(* ── Program ───────────────────────────────────────────────── *)
+
+Program       ::= Contract FunctionDef

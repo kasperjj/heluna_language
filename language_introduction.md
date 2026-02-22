@@ -10,7 +10,7 @@ Heluna is a pure functional language for JSON transformations. If you've ever wr
 
 Every Heluna function takes a single JSON record as input and returns a single JSON record as output. No exceptions. No side effects. No file I/O, no network calls, no mutable state. The host process (your HTTP server, your message queue consumer, your cron job) handles the messy real world. Heluna handles the transformation, and it does so safely.
 
-The language was designed from the ground up for human-LLM collaboration. The entire specification fits in a single LLM context window. There are roughly 40 reserved words, 25 standard library functions, and one universal function signature. If that sounds small, that's the point.
+The language was designed from the ground up for human-LLM collaboration. The entire specification fits in a single LLM context window. There are roughly 50 reserved words, 25 standard library functions, and one universal function signature. If that sounds small, that's the point.
 
 ---
 

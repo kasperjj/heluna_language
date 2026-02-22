@@ -78,7 +78,7 @@ Heluna encourages small functions that do one thing. If a transformation require
 ### Designed for LLMs
 The entire Heluna specification — grammar, standard library, and worked examples — is designed to fit within a single LLM context window alongside the user's actual work. Key properties that enable this:
 
-* The language is small. There are roughly 40 reserved words and 25 core standard library functions. The complete grammar fits in a few hundred lines.
+* The language is small. There are roughly 50 reserved words and 25 core standard library functions. The complete grammar fits in a few hundred lines.
 * The language is uniform. Every function looks the same. Every contract looks the same. There are no special cases or alternative syntaxes for the same concept.
 * The language is explicit. Nothing is implicit — not returns, not types in contracts, not the handling of absent values. An LLM generating Heluna code is forced to be precise about what it means.
 * The language is verifiable. Every generated function comes with a contract that can be checked automatically. If the LLM gets something wrong, the contract catches it.
