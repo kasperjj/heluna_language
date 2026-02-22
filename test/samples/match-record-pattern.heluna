@@ -1,0 +1,50 @@
+# Tests record pattern matching with field destructuring
+
+contract match-record-pattern
+  input
+    shape as record
+      kind as string,
+      width as maybe float,
+      height as maybe float,
+      radius as maybe float
+    end
+  end
+
+  output
+    area as float,
+    description as string
+  end
+
+  tests
+    test "circle"
+      given { shape: { kind: "circle", width: nothing, height: nothing, radius: 5.0 } }
+      expect { area: 78.5, description: "circle with radius 5.0" }
+    end
+
+    test "rectangle"
+      given { shape: { kind: "rectangle", width: 4.0, height: 3.0, radius: nothing } }
+      expect { area: 12.0, description: "rectangle 4.0 x 3.0" }
+    end
+  end
+end
+
+define match-record-pattern with input
+  let area be match $shape
+    when { kind: "circle", radius: r } then 3.14 * r * r
+    when { kind: "rectangle", width: w, height: h } then w * h
+    else 0.0
+  end
+
+  let description be match $shape
+    when { kind: "circle", radius: r } then
+      "circle with radius " + to-string({ value: r }).value
+    when { kind: "rectangle", width: w, height: h } then
+      "rectangle " + to-string({ value: w }).value + " x " + to-string({ value: h }).value
+    else "unknown shape"
+  end
+
+  result {
+    area: area,
+    description: description
+  }
+end

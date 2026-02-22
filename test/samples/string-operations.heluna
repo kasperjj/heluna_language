@@ -1,0 +1,35 @@
+# Tests string concatenation with the + operator
+
+contract string-operations
+  input
+    first as string,
+    last as string,
+    separator as string
+  end
+
+  output
+    joined as string,
+    repeated as string,
+    with-space as string
+  end
+
+  tests
+    test "basic concatenation"
+      given { first: "hello", last: "world", separator: "-" }
+      expect { joined: "hello-world", repeated: "hellohello", with-space: "hello world" }
+    end
+
+    test "empty separator"
+      given { first: "foo", last: "bar", separator: "" }
+      expect { joined: "foobar", repeated: "foofoo", with-space: "foo bar" }
+    end
+  end
+end
+
+define string-operations with input
+  result {
+    joined: $first + $separator + $last,
+    repeated: $first + $first,
+    with-space: $first + " " + $last
+  }
+end

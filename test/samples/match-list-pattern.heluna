@@ -1,0 +1,45 @@
+# Tests list pattern matching: empty, single, pair, and rest-destructuring with ..
+
+contract match-list-pattern
+  input
+    items as list of integer
+  end
+
+  output
+    description as string
+  end
+
+  tests
+    test "empty list"
+      given { items: [] }
+      expect { description: "empty" }
+    end
+
+    test "single item"
+      given { items: [42] }
+      expect { description: "single: 42" }
+    end
+
+    test "pair"
+      given { items: [1, 2] }
+      expect { description: "pair: 1 and 2" }
+    end
+
+    test "many items"
+      given { items: [10, 20, 30, 40] }
+      expect { description: "starts with 10" }
+    end
+  end
+end
+
+define match-list-pattern with input
+  result {
+    description: match $items
+      when [] then "empty"
+      when [x] then "single: " + to-string({ value: x }).value
+      when [a, b] then "pair: " + to-string({ value: a }).value + " and " + to-string({ value: b }).value
+      when [first, ..rest] then "starts with " + to-string({ value: first }).value
+      else "unexpected"
+    end
+  }
+end

@@ -1,0 +1,51 @@
+# Tests maybe types across string, integer, and boolean — with nothing handling
+
+contract empty-and-nothing
+  input
+    label as maybe string,
+    count as maybe integer,
+    active as maybe boolean
+  end
+
+  output
+    summary as string
+  end
+
+  tests
+    test "all present"
+      given { label: "widgets", count: 5, active: true }
+      expect { summary: "widgets: 5 (active)" }
+    end
+
+    test "all absent"
+      given { label: nothing, count: nothing, active: nothing }
+      expect { summary: "unknown: 0 (inactive)" }
+    end
+
+    test "partial values"
+      given { label: "gadgets", count: nothing, active: false }
+      expect { summary: "gadgets: 0 (inactive)" }
+    end
+  end
+end
+
+define empty-and-nothing with input
+  let safe-label be match $label
+    when nothing then "unknown"
+    when l then l
+  end
+
+  let safe-count be match $count
+    when nothing then 0
+    when c then c
+  end
+
+  let status be match $active
+    when true then "active"
+    else "inactive"
+  end
+
+  result {
+    summary: safe-label + ": " + to-string({ value: safe-count }).value + " (" + status + ")"
+  }
+end

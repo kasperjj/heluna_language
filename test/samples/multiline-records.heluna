@@ -1,0 +1,58 @@
+# Tests records and lists spanning multiple lines with nested access
+
+contract multiline-records
+  input
+    person as record
+      first-name as string,
+      last-name as string,
+      contacts as list of record
+        type as string,
+        value as string
+      end
+    end
+  end
+
+  output
+    full-name as string,
+    primary-contact as string
+  end
+
+  tests
+    test "multiline structures"
+      given {
+        person: {
+          first-name: "Ada",
+          last-name: "Lovelace",
+          contacts: [
+            {
+              type: "email",
+              value: "ada@example.com"
+            },
+            {
+              type: "phone",
+              value: "555-0100"
+            }
+          ]
+        }
+      }
+      expect {
+        full-name: "Ada Lovelace",
+        primary-contact: "ada@example.com"
+      }
+    end
+  end
+end
+
+define multiline-records with input
+  let full-name be $person.first-name + " " + $person.last-name
+
+  let primary be match $person.contacts
+    when [first, ..] then first.value
+    else "none"
+  end
+
+  result {
+    full-name: full-name,
+    primary-contact: primary
+  }
+end

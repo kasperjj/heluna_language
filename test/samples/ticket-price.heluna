@@ -1,0 +1,48 @@
+# Tests if/then/else/end and chained else-if
+
+contract ticket-price
+  input
+    age as integer
+  end
+
+  output
+    price as float,
+    category as string
+  end
+
+  tests
+    test "child discount"
+      given { age: 8 }
+      expect { price: 5.0, category: "child" }
+    end
+
+    test "adult price"
+      given { age: 35 }
+      expect { price: 15.0, category: "adult" }
+    end
+
+    test "senior discount"
+      given { age: 70 }
+      expect { price: 10.0, category: "senior" }
+    end
+  end
+end
+
+define ticket-price with input
+  let category be
+    if $age < 12 then "child"
+    else if $age >= 65 then "senior"
+    else "adult"
+    end
+
+  let price be
+    if category = "child" then 5.0
+    else if category = "senior" then 10.0
+    else 15.0
+    end
+
+  result {
+    price: price,
+    category: category
+  }
+end

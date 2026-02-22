@@ -1,0 +1,46 @@
+# Tests match/when/then with nothing, between..and ranges, binding + guard, and else
+
+contract describe-value
+  input
+    value as maybe integer
+  end
+
+  output
+    description as string
+  end
+
+  tests
+    test "nothing"
+      given { value: nothing }
+      expect { description: "no value provided" }
+    end
+
+    test "negative"
+      given { value: -5 }
+      expect { description: "negative" }
+    end
+
+    test "small positive"
+      given { value: 42 }
+      expect { description: "between 1 and 100" }
+    end
+
+    test "large"
+      given { value: 500 }
+      expect { description: "large number: 500" }
+    end
+  end
+end
+
+define describe-value with input
+  result {
+    description: match $value
+      when nothing then "no value provided"
+      when between -999999 and -1 then "negative"
+      when 0 then "zero"
+      when between 1 and 100 then "between 1 and 100"
+      when n and n > 100 then "large number: " + to-string({ value: n }).value
+      else "unexpected"
+    end
+  }
+end

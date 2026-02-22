@@ -1,0 +1,32 @@
+# Tests let/be bindings and float arithmetic
+
+contract rectangle-area
+  input
+    width as float,
+    height as float
+  end
+
+  output
+    area as float,
+    perimeter as float
+  end
+
+  tests
+    test "3x4 rectangle"
+      given { width: 3.0, height: 4.0 }
+      expect { area: 12.0, perimeter: 14.0 }
+    end
+  end
+end
+
+define rectangle-area with input
+  let w be $width
+  let h be $height
+  let computed-area be w * h
+  let computed-perimeter be 2.0 * (w + h)
+
+  result {
+    area: computed-area,
+    perimeter: computed-perimeter
+  }
+end

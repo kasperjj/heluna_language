@@ -1,0 +1,54 @@
+# Tests boolean literals, comparisons, and logical operators (and, or, not) in if conditions
+
+contract boolean-logic
+  input
+    age as integer,
+    has-ticket as boolean,
+    is-vip as boolean
+  end
+
+  output
+    can-enter as boolean,
+    category as string
+  end
+
+  tests
+    test "adult with ticket"
+      given { age: 25, has-ticket: true, is-vip: false }
+      expect { can-enter: true, category: "standard" }
+    end
+
+    test "child denied"
+      given { age: 10, has-ticket: true, is-vip: false }
+      expect { can-enter: false, category: "minor" }
+    end
+
+    test "vip adult without ticket"
+      given { age: 30, has-ticket: false, is-vip: true }
+      expect { can-enter: true, category: "vip" }
+    end
+
+    test "adult no ticket not vip"
+      given { age: 40, has-ticket: false, is-vip: false }
+      expect { can-enter: false, category: "standard" }
+    end
+  end
+end
+
+define boolean-logic with input
+  let category be
+    if $age < 18 then "minor"
+    else if $is-vip then "vip"
+    else "standard"
+    end
+
+  let can-enter be
+    if $age >= 18 and ($has-ticket or $is-vip) then true
+    else false
+    end
+
+  result {
+    can-enter: can-enter,
+    category: category
+  }
+end

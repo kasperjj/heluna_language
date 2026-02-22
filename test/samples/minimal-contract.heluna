@@ -1,0 +1,15 @@
+# Smallest valid Heluna program: no rules, no tags, no tests
+
+contract minimal
+  input
+    x as integer
+  end
+
+  output
+    x as integer
+  end
+end
+
+define minimal with input
+  result { x: $x }
+end

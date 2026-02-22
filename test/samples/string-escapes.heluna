@@ -1,0 +1,38 @@
+# Tests string literal edge cases: escape sequences and empty strings
+
+contract string-escapes
+  input
+    name as string
+  end
+
+  output
+    quoted as string,
+    with-newline as string,
+    with-tab as string,
+    with-backslash as string,
+    empty as string
+  end
+
+  tests
+    test "escape sequences"
+      given { name: "world" }
+      expect {
+        quoted: "\"hello\"",
+        with-newline: "line1\nline2",
+        with-tab: "col1\tcol2",
+        with-backslash: "path\\to\\file",
+        empty: ""
+      }
+    end
+  end
+end
+
+define string-escapes with input
+  result {
+    quoted: "\"hello\"",
+    with-newline: "line1\nline2",
+    with-tab: "col1\tcol2",
+    with-backslash: "path\\to\\file",
+    empty: ""
+  }
+end

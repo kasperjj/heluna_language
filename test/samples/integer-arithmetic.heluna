@@ -1,0 +1,40 @@
+# Tests integer arithmetic: +, -, *, /, %, unary minus
+
+contract integer-arithmetic
+  input
+    a as integer,
+    b as integer
+  end
+
+  output
+    sum as integer,
+    difference as integer,
+    product as integer,
+    quotient as integer,
+    remainder as integer,
+    negated as integer
+  end
+
+  tests
+    test "basic operations"
+      given { a: 17, b: 5 }
+      expect { sum: 22, difference: 12, product: 85, quotient: 3, remainder: 2, negated: -17 }
+    end
+
+    test "negative operand"
+      given { a: -10, b: 3 }
+      expect { sum: -7, difference: -13, product: -30, quotient: -3, remainder: -1, negated: 10 }
+    end
+  end
+end
+
+define integer-arithmetic with input
+  result {
+    sum: $a + $b,
+    difference: $a - $b,
+    product: $a * $b,
+    quotient: $a / $b,
+    remainder: $a % $b,
+    negated: -$a
+  }
+end

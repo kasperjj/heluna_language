@@ -1,0 +1,37 @@
+# Tests filter and map used in sequence, plus fold for aggregation
+
+contract list-pipeline
+  input
+    values as list of integer
+  end
+
+  output
+    evens as list of integer,
+    doubled as list of integer,
+    total as integer
+  end
+
+  tests
+    test "chained operations"
+      given { values: [1, 2, 3, 4, 5, 6] }
+      expect { evens: [2, 4, 6], doubled: [4, 8, 12], total: 24 }
+    end
+
+    test "no evens"
+      given { values: [1, 3, 5] }
+      expect { evens: [], doubled: [], total: 0 }
+    end
+  end
+end
+
+define list-pipeline with input
+  let evens be filter $values where n n % 2 = 0 end
+  let doubled be map evens as n do n * 2 end
+  let total be fold({ list: doubled, initial: 0, fn: "add" })
+
+  result {
+    evens: evens,
+    doubled: doubled,
+    total: total
+  }
+end

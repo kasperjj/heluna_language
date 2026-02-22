@@ -1,0 +1,48 @@
+# Tests require rules on both input and output with else reject
+
+contract create-order
+  input
+    quantity as integer,
+    unit-price as float,
+    discount as float
+  end
+
+  output
+    total as float,
+    quantity as integer
+  end
+
+  rules
+    require input.quantity
+      input.quantity > 0
+      else reject "quantity must be positive"
+    end
+
+    require input.discount
+      input.discount >= 0.0 and input.discount <= 1.0
+      else reject "discount must be between 0 and 1"
+    end
+
+    require output.total
+      output.total >= 0.0
+      else reject "total must not be negative"
+    end
+  end
+
+  tests
+    test "simple order"
+      given { quantity: 3, unit-price: 10.0, discount: 0.1 }
+      expect { total: 27.0, quantity: 3 }
+    end
+  end
+end
+
+define create-order with input
+  let subtotal be to-float({ value: $quantity }) * $unit-price
+  let total be subtotal * (1.0 - $discount)
+
+  result {
+    total: total,
+    quantity: $quantity
+  }
+end

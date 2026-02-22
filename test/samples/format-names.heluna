@@ -1,0 +1,30 @@
+# Tests map...as...do with record field access and through pipeline
+
+contract format-names
+  input
+    names as list of record first as string, last as string end
+  end
+
+  output
+    labels as list of string
+  end
+
+  tests
+    test "format list"
+      given { names: [
+        { first: "Ada", last: "Lovelace" },
+        { first: "Alan", last: "Turing" }
+      ]}
+      expect { labels: ["Lovelace, Ada", "Turing, Alan"] }
+    end
+  end
+end
+
+define format-names with input
+  result {
+    labels: $names
+      through map $names as person do
+        person.last + ", " + person.first
+      end
+  }
+end

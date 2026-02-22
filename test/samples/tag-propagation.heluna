@@ -1,0 +1,45 @@
+# Tests that tags propagate through concatenation and that sanitizers strip them
+
+contract tag-propagation
+
+  tags
+    secret "confidential data",
+    internal "for internal use only"
+  end
+
+  sanitizers
+    hash strips secret internal
+  end
+
+  input
+    api-key as string tagged secret,
+    label as string tagged internal,
+    public-note as string
+  end
+
+  output
+    safe-id as string,
+    display as string
+  end
+
+  rules
+    forbid tagged secret in output
+    forbid tagged internal in output
+  end
+
+  tests
+    test "tags stripped by sanitizer"
+      given { api-key: "sk-12345", label: "production", public-note: "ready" }
+      expect { safe-id: "abc123", display: "ready" }
+    end
+  end
+end
+
+define tag-propagation with input
+  let safe-id be hash({ value: $api-key })
+
+  result {
+    safe-id: safe-id,
+    display: $public-note
+  }
+end

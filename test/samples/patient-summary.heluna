@@ -1,0 +1,63 @@
+# Tests tags, sanitizers, tagged fields, and forbid rules for data security
+
+contract patient-summary
+
+  tags
+    pii "personally identifiable information",
+    phi "protected health information",
+    restricted "must not leave processing boundary"
+  end
+
+  sanitizers
+    hash strips restricted pii phi,
+    bracket-age strips restricted pii
+  end
+
+  input
+    patient-name as string tagged pii restricted,
+    ssn as string tagged pii restricted,
+    date-of-birth as string tagged phi restricted,
+    diagnosis-code as string,
+    visit-count as integer
+  end
+
+  output
+    patient-hash as string,
+    age-range as string,
+    diagnosis-code as string,
+    visit-count as integer
+  end
+
+  rules
+    forbid tagged restricted in output
+    forbid tagged pii in output
+    forbid tagged phi in output
+  end
+
+  tests
+    test "basic summary"
+      given {
+        patient-name: "Jane Doe",
+        ssn: "123-45-6789",
+        date-of-birth: "1985-03-15",
+        diagnosis-code: "J06.9",
+        visit-count: 3
+      }
+      expect {
+        patient-hash: "a1b2c3",
+        age-range: "35-44",
+        diagnosis-code: "J06.9",
+        visit-count: 3
+      }
+    end
+  end
+end
+
+define patient-summary with input
+  result {
+    patient-hash: hash({ value: $patient-name + $ssn }),
+    age-range: bracket-age({ date-of-birth: $date-of-birth }),
+    diagnosis-code: $diagnosis-code,
+    visit-count: $visit-count
+  }
+end

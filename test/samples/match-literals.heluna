@@ -1,0 +1,60 @@
+# Tests matching on specific string, integer, and boolean literals, plus wildcard and else
+
+contract match-literals
+  input
+    color as string,
+    count as integer,
+    flag as boolean
+  end
+
+  output
+    color-code as string,
+    count-label as string,
+    flag-label as string
+  end
+
+  tests
+    test "known values"
+      given { color: "red", count: 1, flag: true }
+      expect { color-code: "#FF0000", count-label: "one", flag-label: "yes" }
+    end
+
+    test "unknown color and large count"
+      given { color: "purple", count: 42, flag: false }
+      expect { color-code: "unknown", count-label: "many", flag-label: "no" }
+    end
+
+    test "zero"
+      given { color: "green", count: 0, flag: true }
+      expect { color-code: "#00FF00", count-label: "none", flag-label: "yes" }
+    end
+  end
+end
+
+define match-literals with input
+  let color-code be match $color
+    when "red" then "#FF0000"
+    when "green" then "#00FF00"
+    when "blue" then "#0000FF"
+    else "unknown"
+  end
+
+  let count-label be match $count
+    when 0 then "none"
+    when 1 then "one"
+    when 2 then "two"
+    when 3 then "three"
+    when _ then "many"
+  end
+
+  let flag-label be match $flag
+    when true then "yes"
+    when false then "no"
+  end
+
+  result {
+    color-code: color-code,
+    count-label: count-label,
+    flag-label: flag-label
+  }
+end

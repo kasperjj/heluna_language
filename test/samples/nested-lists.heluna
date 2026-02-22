@@ -1,0 +1,48 @@
+# Tests list of list, list of record, and nested access patterns
+
+contract nested-lists
+  input
+    matrix as list of list of integer,
+    people as list of record name as string, age as integer end
+  end
+
+  output
+    first-row as list of integer,
+    names as list of string
+  end
+
+  tests
+    test "nested structures"
+      given {
+        matrix: [[1, 2, 3], [4, 5, 6]],
+        people: [
+          { name: "Alice", age: 30 },
+          { name: "Bob", age: 25 }
+        ]
+      }
+      expect {
+        first-row: [1, 2, 3],
+        names: ["Alice", "Bob"]
+      }
+    end
+
+    test "empty inputs"
+      given { matrix: [], people: [] }
+      expect { first-row: [], names: [] }
+    end
+  end
+end
+
+define nested-lists with input
+  let first-row be match $matrix
+    when [first, ..] then first
+    when [] then []
+  end
+
+  let names be map $people as person do person.name end
+
+  result {
+    first-row: first-row,
+    names: names
+  }
+end

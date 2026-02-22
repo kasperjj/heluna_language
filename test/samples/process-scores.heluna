@@ -1,0 +1,39 @@
+# Tests filter...where, fold, and length stdlib calls
+
+contract process-scores
+  input
+    scores as list of integer
+  end
+
+  output
+    passing as list of integer,
+    average as float,
+    count as integer
+  end
+
+  tests
+    test "mixed scores"
+      given { scores: [85, 42, 91, 55, 73, 68] }
+      expect { passing: [85, 91, 73, 68], average: 79.25, count: 4 }
+    end
+  end
+end
+
+define process-scores with input
+  let passing-scores be
+    filter $scores where s s >= 60 end
+
+  let total be fold({
+    list: passing-scores,
+    initial: 0.0,
+    fn: "add"
+  })
+
+  let num-passing be length({ list: passing-scores })
+
+  result {
+    passing: passing-scores,
+    average: total / to-float({ value: num-passing }),
+    count: num-passing
+  }
+end

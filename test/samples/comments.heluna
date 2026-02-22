@@ -1,0 +1,35 @@
+# This file tests comment handling in the lexer
+# Multiple comment lines before the contract
+
+# Blank line between comments and contract
+
+contract comments
+  # Comment inside contract before input
+  input
+    x as integer
+  end
+
+  output
+    y as integer
+  end
+
+  # Comment between sections
+  tests
+    # Comment before a test
+    test "identity"
+      given { x: 42 }
+      expect { y: 42 }
+    end
+  end
+end
+
+# Comment between contract and function
+define comments with input
+  # Comment inside function body
+  let value be $x
+
+  result {
+    y: value
+  }
+end
+# Trailing comment at end of file

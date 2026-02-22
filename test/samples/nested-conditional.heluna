@@ -1,0 +1,50 @@
+# Tests if expressions nested inside let bindings and inside record literals
+
+contract nested-conditional
+  input
+    temperature as integer,
+    is-raining as boolean
+  end
+
+  output
+    clothing as string,
+    activity as string
+  end
+
+  tests
+    test "cold and raining"
+      given { temperature: 2, is-raining: true }
+      expect { clothing: "winter coat", activity: "stay inside" }
+    end
+
+    test "warm and dry"
+      given { temperature: 28, is-raining: false }
+      expect { clothing: "t-shirt", activity: "go to park" }
+    end
+
+    test "mild and raining"
+      given { temperature: 15, is-raining: true }
+      expect { clothing: "rain jacket", activity: "visit museum" }
+    end
+  end
+end
+
+define nested-conditional with input
+  let clothing be
+    if $temperature < 5 then "winter coat"
+    else if $is-raining then "rain jacket"
+    else if $temperature > 25 then "t-shirt"
+    else "sweater"
+    end
+
+  result {
+    clothing: clothing,
+    activity:
+      if $is-raining then
+        if $temperature < 5 then "stay inside"
+        else "visit museum"
+        end
+      else "go to park"
+      end
+  }
+end

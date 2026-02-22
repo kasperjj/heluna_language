@@ -1,0 +1,39 @@
+# Tests float arithmetic and scientific notation literals
+
+contract float-arithmetic
+  input
+    x as float,
+    y as float
+  end
+
+  output
+    sum as float,
+    product as float,
+    ratio as float
+  end
+
+  tests
+    test "basic float ops"
+      given { x: 3.14, y: 2.0 }
+      expect { sum: 5.14, product: 6.28, ratio: 1.57 }
+    end
+
+    test "scientific notation"
+      given { x: 1.5e2, y: 3.0E1 }
+      expect { sum: 180.0, product: 4500.0, ratio: 5.0 }
+    end
+
+    test "small floats"
+      given { x: 0.001, y: 1.0e-3 }
+      expect { sum: 0.002, product: 0.000001, ratio: 1.0 }
+    end
+  end
+end
+
+define float-arithmetic with input
+  result {
+    sum: $x + $y,
+    product: $x * $y,
+    ratio: $x / $y
+  }
+end

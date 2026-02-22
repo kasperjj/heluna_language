@@ -1,0 +1,47 @@
+# Tests uses declaration, cross-contract function calls, and require rules with else reject
+
+contract validate-user
+  uses normalize-email
+
+  input
+    name as string,
+    email as string,
+    age as integer
+  end
+
+  output
+    name as string,
+    email as string,
+    age-group as string
+  end
+
+  rules
+    require output.age-group
+      output.age-group = "minor" or output.age-group = "adult" or output.age-group = "senior"
+      else reject "invalid age group"
+    end
+  end
+
+  tests
+    test "adult user"
+      given { name: "Bob", email: "  BOB@test.com ", age: 30 }
+      expect { name: "Bob", email: "bob@test.com", age-group: "adult" }
+    end
+  end
+end
+
+define validate-user with input
+  let clean-email be normalize-email({ email: $email }).email
+
+  let age-group be
+    if $age < 18 then "minor"
+    else if $age >= 65 then "senior"
+    else "adult"
+    end
+
+  result {
+    name: $name,
+    email: clean-email,
+    age-group: age-group
+  }
+end

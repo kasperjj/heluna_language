@@ -1,0 +1,41 @@
+# Tests match rule in the contract rules block (MatchRule grammar production)
+
+contract match-rule
+  input
+    status as string,
+    priority as integer
+  end
+
+  output
+    label as string,
+    status as string
+  end
+
+  rules
+    match output.status
+      when "open" then true
+      when "closed" then true
+      when "pending" then true
+      else reject "status must be open, closed, or pending"
+    end
+  end
+
+  tests
+    test "valid status"
+      given { status: "open", priority: 1 }
+      expect { label: "P1: open", status: "open" }
+    end
+
+    test "high priority closed"
+      given { status: "closed", priority: 3 }
+      expect { label: "P3: closed", status: "closed" }
+    end
+  end
+end
+
+define match-rule with input
+  result {
+    label: "P" + to-string({ value: $priority }).value + ": " + $status,
+    status: $status
+  }
+end

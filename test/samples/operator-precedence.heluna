@@ -1,0 +1,32 @@
+# Tests arithmetic precedence: * before +, parenthesized grouping, unary minus
+
+contract operator-precedence
+  input
+    a as integer,
+    b as integer,
+    c as integer
+  end
+
+  output
+    mul-first as integer,
+    add-first as integer,
+    left-to-right as integer,
+    negated as integer
+  end
+
+  tests
+    test "precedence and grouping"
+      given { a: 2, b: 3, c: 4 }
+      expect { mul-first: 14, add-first: 20, left-to-right: 2, negated: -2 }
+    end
+  end
+end
+
+define operator-precedence with input
+  result {
+    mul-first: $a + $b * $c,
+    add-first: ($a + $b) * $c,
+    left-to-right: $a * $b - $c,
+    negated: -$a
+  }
+end

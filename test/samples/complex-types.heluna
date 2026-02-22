@@ -1,0 +1,71 @@
+# Tests deeply nested and compound type declarations
+
+contract complex-types
+  input
+    users as list of record
+      name as string,
+      email as maybe string,
+      scores as list of integer,
+      address as record
+        street as string,
+        city as string,
+        zip as maybe string
+      end
+    end,
+    flags as list of boolean,
+    metadata as maybe record
+      version as integer,
+      tags as list of string
+    end
+  end
+
+  output
+    count as integer,
+    first-name as maybe string
+  end
+
+  tests
+    test "nested input"
+      given {
+        users: [
+          {
+            name: "Alice",
+            email: "alice@example.com",
+            scores: [95, 87, 92],
+            address: {
+              street: "123 Main St",
+              city: "Springfield",
+              zip: "62701"
+            }
+          }
+        ],
+        flags: [true, false],
+        metadata: { version: 1, tags: ["prod", "v2"] }
+      }
+      expect { count: 1, first-name: "Alice" }
+    end
+
+    test "empty and nothing"
+      given {
+        users: [],
+        flags: [],
+        metadata: nothing
+      }
+      expect { count: 0, first-name: nothing }
+    end
+  end
+end
+
+define complex-types with input
+  let count be length({ list: $users })
+
+  let first-name be match $users
+    when [first, ..] then first.name
+    when [] then nothing
+  end
+
+  result {
+    count: count,
+    first-name: first-name
+  }
+end
