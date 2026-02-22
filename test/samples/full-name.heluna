@@ -1,0 +1,25 @@
+# A simple Heluna contract for testing the toolchain
+
+contract full-name
+  input
+    first-name as string,
+    last-name as string
+  end
+
+  output
+    full-name as string
+  end
+
+  tests
+    test "basic concatenation"
+      given { first-name: "Ada", last-name: "Lovelace" }
+      expect { full-name: "Ada Lovelace" }
+    end
+  end
+end
+
+define full-name with input
+  result {
+    full-name: $first-name + " " + $last-name
+  }
+end

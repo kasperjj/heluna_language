@@ -1,0 +1,135 @@
+Literal       ::= Integer | Float | String | Boolean | Nothing
+Boolean       ::= 'true' | 'false'
+Nothing       ::= 'nothing'
+Integer       ::= Digit+
+Float         ::= Digit+ '.' Digit+ (('e' | 'E') ('-' | '+')? Digit+)?
+String        ::= '"' Character* '"'
+Comment       ::= '#' (any character until end of line)
+Identifier    ::= Letter (Letter | Digit | '-')*
+
+Type          ::= BaseType | MaybeType | ListType | RecordType
+BaseType      ::= 'string' | 'integer' | 'float' | 'boolean'
+MaybeType     ::= 'maybe' Type
+ListType      ::= 'list' 'of' Type
+RecordType    ::= 'record' FieldDecl (',' FieldDecl)* 'end'
+FieldDecl     ::= Identifier 'as' Type
+
+Expression    ::= MatchExpr | IfExpr | LetExpr | FilterExpr
+                 | MapExpr | ThroughExpr
+
+ThroughExpr   ::= CompareExpr ('through' (FunctionCall | FilterExpr | MapExpr))*
+
+CompareExpr   ::= ArithExpr (CompareOp ArithExpr)?
+CompareOp     ::= '=' | '!=' | '<' | '>' | '<=' | '>='
+
+ArithExpr     ::= Term (('+' | '-') Term)*
+Term          ::= Unary (('*' | '/' | '%') Unary)*
+Unary         ::= '-'? Atom
+
+Atom          ::= Literal
+               | Identifier Accessor*
+               | '$' Identifier Accessor*
+               | FunctionCall Accessor*
+               | ListLiteral Accessor*
+               | RecordLiteral Accessor*
+               | '(' Expression ')'
+
+Accessor      ::= '.' (Identifier | Integer)
+
+ListLiteral   ::= '[' (Expression (',' Expression)*)? ']'
+RecordLiteral ::= '{' (Label (',' Label)*)? '}'
+Label         ::= Identifier ':' Expression
+
+IfExpr        ::= 'if' BoolExpr 'then' Expression
+                   ('else' 'if' BoolExpr 'then' Expression)*
+                   'else' Expression
+                   'end'
+
+BoolExpr      ::= CompareExpr (('and' | 'or') CompareExpr)*
+               | 'not' BoolExpr
+
+MatchExpr     ::= 'match' Expression
+                   WhenClause+
+                   ('else' Expression)?
+                   'end'
+
+WhenClause    ::= 'when' Pattern ('and' Guard)? 'then' Expression
+
+Pattern       ::= LiteralPattern
+               | TypePattern
+               | ListPattern
+               | RecordPattern
+               | RangePattern
+               | BindingPattern
+               | WildcardPattern
+
+LiteralPattern   ::= Literal
+TypePattern      ::= Type
+ListPattern      ::= '[' (Pattern (',' Pattern)* (',' '..' Identifier?)?)? ']'
+RecordPattern    ::= '{' FieldPattern (',' FieldPattern)* '}'
+FieldPattern     ::= Identifier ':' Pattern
+RangePattern     ::= 'between' Expression 'and' Expression
+BindingPattern   ::= Identifier
+WildcardPattern  ::= '_'
+
+Guard            ::= BoolExpr
+
+LetExpr       ::= 'let' Identifier 'be' Expression
+                   (LetExpr | Expression)
+
+FilterExpr    ::= 'filter' Expression 'where' Identifier BoolExpr 'end'
+
+MapExpr       ::= 'map' Expression 'as' Identifier 'do' Expression 'end'
+
+ThroughExpr   ::= Expression ('through' (FunctionCall | FilterExpr | MapExpr))*
+
+FunctionDef   ::= 'define' Identifier 'with' 'input'
+                   Expression
+                   'result' Expression
+                   'end'
+
+FunctionCall  ::= Identifier '(' RecordLiteral ')'
+
+TagDecl       ::= 'tags' TagDef (',' TagDef)* 'end'
+TagDef        ::= Identifier String?
+
+SanitizerDecl  ::= 'sanitizers' SanitizerDef+ 'end'
+SanitizerDef   ::= Identifier 'strips' Identifier+ (',' SanitizerDef)*
+
+Contract       ::= 'contract' Identifier
+                    UsesDecl?
+                    TagDecl?
+                    SanitizerDecl?
+                    InputSpec
+                    OutputSpec
+                    RuleList?
+                    TestList?
+                    'end'
+
+ForbidRule     ::= 'forbid' FieldRef 'in' 'output'
+                | 'forbid' 'tagged' Identifier 'in' 'output'
+
+UsesDecl      ::= 'uses' Identifier (',' Identifier)*
+InputSpec     ::= 'input' FieldDecl (',' FieldDecl)* 'end'
+OutputSpec    ::= 'output' FieldDecl (',' FieldDecl)* 'end'
+
+RuleList      ::= 'rules' Rule+ 'end'
+
+Rule          ::= ForbidRule | RequireRule | MatchRule
+
+ForbidRule    ::= 'forbid' FieldRef 'in' 'output'
+RequireRule   ::= 'require' FieldRef BoolExpr
+                   ('else' 'reject' String)? 'end'
+MatchRule     ::= 'match' FieldRef
+                   WhenClause+
+                   ('else' 'reject' String)?
+                   'end'
+
+FieldRef      ::= ('input' | 'output') Accessor+
+
+TestList      ::= 'tests' TestCase+ 'end'
+
+TestCase      ::= 'test' String
+                   'given' RecordLiteral
+                   'expect' RecordLiteral
+                   'end'
