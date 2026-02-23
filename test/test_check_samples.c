@@ -93,10 +93,13 @@ static void test_sample(const char *name) {
 static const char *samples[] = {
     "boolean-logic",
     "comments",
+    "company-security",
     "complex-types",
+    "customers-source",
     "create-order",
     "describe-value",
     "empty-and-nothing",
+    "enrich-order",
     "float-arithmetic",
     "forbid-field-rule",
     "format-names",

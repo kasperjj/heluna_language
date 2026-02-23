@@ -1,0 +1,8 @@
+# Tag contract — defines a reusable security vocabulary
+
+contract company-security
+  tags
+    pii "personally identifiable information",
+    restricted "must not leave processing boundary"
+  end
+end

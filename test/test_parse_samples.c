@@ -5,13 +5,15 @@
  * For each sample in test/samples/<name>.heluna, this test:
  *   1. Reads and parses the file
  *   2. Asserts parser.had_error == 0
- *   3. Asserts prog != NULL, prog->contract != NULL, prog->function != NULL
- *   4. Asserts contract name and function name match the filename stem
+ *   3. Asserts prog != NULL, prog->contract != NULL
+ *   4. For function contracts: asserts prog->function != NULL and names match
+ *   5. For tag/source contracts: asserts prog->function == NULL
  *
  * Run from the project root (make test does this automatically).
  */
 
 #include "heluna/parser.h"
+#include "heluna/ast.h"
 #include "heluna/arena.h"
 #include <stdio.h>
 #include <string.h>
@@ -88,14 +90,15 @@ static void test_sample(const char *name) {
                 name, prog->contract->name, name);
     }
 
-    if (ok && !prog->function) {
-        fprintf(stderr, "  FAIL: %s — prog->function is NULL\n", name);
-        ok = 0;
-    }
-
-    if (ok && strcmp(prog->function->name, name) != 0) {
-        fprintf(stderr, "  NOTE: %s — function name is \"%s\" (filename stem is \"%s\")\n",
-                name, prog->function->name, name);
+    if (ok && prog->contract->kind == CONTRACT_FUNCTION) {
+        if (!prog->function) {
+            fprintf(stderr, "  FAIL: %s — prog->function is NULL\n", name);
+            ok = 0;
+        }
+        if (ok && strcmp(prog->function->name, name) != 0) {
+            fprintf(stderr, "  NOTE: %s — function name is \"%s\" (filename stem is \"%s\")\n",
+                    name, prog->function->name, name);
+        }
     }
 
     tests_run++;
@@ -110,10 +113,13 @@ static void test_sample(const char *name) {
 static const char *samples[] = {
     "boolean-logic",
     "comments",
+    "company-security",
     "complex-types",
+    "customers-source",
     "create-order",
     "describe-value",
     "empty-and-nothing",
+    "enrich-order",
     "float-arithmetic",
     "forbid-field-rule",
     "format-names",

@@ -1,0 +1,20 @@
+# Source contract — defines a read-only external data dependency
+
+contract customers-source
+  uses company-security
+
+  tags
+    pii "personally identifiable information",
+    restricted "must not leave processing boundary"
+  end
+
+  source "customers"
+
+  keyed-by customer-id as string
+
+  returns record
+    customer-id as string,
+    name as string tagged pii,
+    credit-limit as float tagged restricted
+  end
+end

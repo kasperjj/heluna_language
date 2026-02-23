@@ -33,6 +33,11 @@ typedef enum {
     TOK_TEST,
     TOK_GIVEN,
     TOK_EXPECT,
+    TOK_SOURCE,
+    TOK_SOURCES,
+    TOK_KEYED_BY,
+    TOK_RETURNS,
+    TOK_LOOKUP,
 
     /* Keywords — types */
     TOK_AS,

@@ -29,6 +29,7 @@ static int is_block_expr(const AstExpr *e) {
     case EXPR_MATCH:
     case EXPR_FILTER:
     case EXPR_MAP:
+    case EXPR_LOOKUP:
         return 1;
     default:
         return 0;
@@ -368,6 +369,22 @@ static void fmt_expr(const AstExpr *e, FILE *out, int depth) {
         fmt_expr(e->as.access.object, out, depth);
         fprintf(out, ".%s", e->as.access.field);
         break;
+
+    case EXPR_LOOKUP:
+        fprintf(out, "lookup %s\n", e->as.lookup.source_name);
+        indent(out, depth + 1);
+        fprintf(out, "where ");
+        for (const AstLookupKey *lk = e->as.lookup.keys; lk; lk = lk->next) {
+            if (lk != e->as.lookup.keys) {
+                fprintf(out, ", ");
+            }
+            fprintf(out, "%s = ", lk->name);
+            fmt_expr(lk->value, out, depth + 1);
+        }
+        fprintf(out, "\n");
+        indent(out, depth);
+        fprintf(out, "end");
+        break;
     }
 }
 
@@ -400,6 +417,36 @@ static void fmt_contract(const AstContract *c, FILE *out) {
         fprintf(out, "end\n\n");
     }
 
+    /* Source contract: source, keyed-by, returns */
+    if (c->kind == CONTRACT_SOURCE) {
+        indent(out, 1);
+        fprintf(out, "source %s\n\n", c->source_name);
+
+        indent(out, 1);
+        fprintf(out, "keyed-by ");
+        for (const AstFieldDecl *fd = c->keyed_by; fd; fd = fd->next) {
+            if (fd != c->keyed_by) fprintf(out, ", ");
+            fmt_field_decl(fd, out, 1);
+        }
+        fprintf(out, "\n\n");
+
+        indent(out, 1);
+        fprintf(out, "returns ");
+        fmt_type(c->returns_type, out, 1);
+        fprintf(out, "\n");
+
+        fprintf(out, "end\n");
+        return;
+    }
+
+    /* Tag contract: just tags (already printed above) */
+    if (c->kind == CONTRACT_TAG) {
+        fprintf(out, "end\n");
+        return;
+    }
+
+    /* Function contract continues below */
+
     /* sanitizers */
     if (c->sanitizers) {
         indent(out, 1);
@@ -414,6 +461,17 @@ static void fmt_contract(const AstContract *c, FILE *out) {
         }
         indent(out, 1);
         fprintf(out, "end\n\n");
+    }
+
+    /* sources */
+    if (c->sources_count > 0) {
+        indent(out, 1);
+        fprintf(out, "sources");
+        for (int i = 0; i < c->sources_count; i++) {
+            if (i > 0) fprintf(out, ",");
+            fprintf(out, " %s", c->sources_refs[i]);
+        }
+        fprintf(out, "\n\n");
     }
 
     /* input */

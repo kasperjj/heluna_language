@@ -201,6 +201,17 @@ static void print_expr(const AstExpr *e, FILE *out, int depth) {
         print_expr(e->as.paren.inner, out, depth);
         fprintf(out, ")");
         break;
+    case EXPR_LOOKUP:
+        fprintf(out, "(lookup %s", e->as.lookup.source_name);
+        for (const AstLookupKey *lk = e->as.lookup.keys; lk; lk = lk->next) {
+            fprintf(out, "\n");
+            indent(out, depth + 1);
+            fprintf(out, "(%s = ", lk->name);
+            print_expr(lk->value, out, depth + 1);
+            fprintf(out, ")");
+        }
+        fprintf(out, ")");
+        break;
     }
 }
 
@@ -346,7 +357,32 @@ void ast_print(const AstProgram *prog, FILE *out) {
             fprintf(out, ")\n");
         }
 
-        /* sanitizers */
+        /* source contract fields */
+        if (c->kind == CONTRACT_SOURCE) {
+            if (c->source_name) {
+                indent(out, 2);
+                fprintf(out, "(source %s)\n", c->source_name);
+            }
+            if (c->keyed_by) {
+                indent(out, 2);
+                fprintf(out, "(keyed-by\n");
+                for (const AstFieldDecl *fd = c->keyed_by; fd; fd = fd->next) {
+                    indent(out, 3);
+                    print_field_decl(fd, out, 3);
+                    fprintf(out, "\n");
+                }
+                indent(out, 2);
+                fprintf(out, ")\n");
+            }
+            if (c->returns_type) {
+                indent(out, 2);
+                fprintf(out, "(returns ");
+                print_type(c->returns_type, out, 2);
+                fprintf(out, ")\n");
+            }
+        }
+
+        /* sanitizers (function contract only) */
         if (c->sanitizers) {
             indent(out, 2);
             fprintf(out, "(sanitizers\n");
@@ -361,27 +397,40 @@ void ast_print(const AstProgram *prog, FILE *out) {
             fprintf(out, ")\n");
         }
 
-        /* input */
-        indent(out, 2);
-        fprintf(out, "(input\n");
-        for (const AstFieldDecl *fd = c->input; fd; fd = fd->next) {
-            indent(out, 3);
-            print_field_decl(fd, out, 3);
-            fprintf(out, "\n");
+        /* sources refs */
+        if (c->sources_count > 0) {
+            indent(out, 2);
+            fprintf(out, "(sources");
+            for (int i = 0; i < c->sources_count; i++)
+                fprintf(out, " %s", c->sources_refs[i]);
+            fprintf(out, ")\n");
         }
-        indent(out, 2);
-        fprintf(out, ")\n");
 
-        /* output */
-        indent(out, 2);
-        fprintf(out, "(output\n");
-        for (const AstFieldDecl *fd = c->output; fd; fd = fd->next) {
-            indent(out, 3);
-            print_field_decl(fd, out, 3);
-            fprintf(out, "\n");
+        /* input (function contracts only) */
+        if (c->input) {
+            indent(out, 2);
+            fprintf(out, "(input\n");
+            for (const AstFieldDecl *fd = c->input; fd; fd = fd->next) {
+                indent(out, 3);
+                print_field_decl(fd, out, 3);
+                fprintf(out, "\n");
+            }
+            indent(out, 2);
+            fprintf(out, ")\n");
         }
-        indent(out, 2);
-        fprintf(out, ")\n");
+
+        /* output (function contracts only) */
+        if (c->output) {
+            indent(out, 2);
+            fprintf(out, "(output\n");
+            for (const AstFieldDecl *fd = c->output; fd; fd = fd->next) {
+                indent(out, 3);
+                print_field_decl(fd, out, 3);
+                fprintf(out, "\n");
+            }
+            indent(out, 2);
+            fprintf(out, ")\n");
+        }
 
         /* rules */
         if (c->rules) {

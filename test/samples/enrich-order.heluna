@@ -1,0 +1,54 @@
+# Function contract with source lookup
+
+contract enrich-order
+  uses company-security
+
+  tags
+    pii "personally identifiable information",
+    restricted "must not leave processing boundary"
+  end
+
+  sanitizers
+    hash strips restricted pii
+  end
+
+  sources customers-source
+
+  input
+    customer-id as string,
+    order-total as float
+  end
+
+  output
+    approved as boolean,
+    customer-hash as string
+  end
+
+  rules
+    forbid tagged restricted in output
+  end
+
+  tests
+    test "approved order"
+      given { customer-id: "C001", order-total: 50.0 }
+      expect { approved: true, customer-hash: "abc" }
+    end
+  end
+end
+
+define enrich-order with input
+  let customer be
+    lookup customers-source
+      where customer-id = $customer-id
+    end
+
+  let approved be match customer
+    when nothing then false
+    when c then $order-total <= c.credit-limit
+  end
+
+  result {
+    approved: approved,
+    customer-hash: hash({ value: $customer-id })
+  }
+end

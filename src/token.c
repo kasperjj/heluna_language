@@ -26,6 +26,11 @@ const char *token_kind_name(TokenKind kind) {
     case TOK_TEST:          return "TEST";
     case TOK_GIVEN:         return "GIVEN";
     case TOK_EXPECT:        return "EXPECT";
+    case TOK_SOURCE:        return "SOURCE";
+    case TOK_SOURCES:       return "SOURCES";
+    case TOK_KEYED_BY:      return "KEYED_BY";
+    case TOK_RETURNS:       return "RETURNS";
+    case TOK_LOOKUP:        return "LOOKUP";
     case TOK_AS:            return "AS";
     case TOK_STRING_TYPE:   return "STRING_TYPE";
     case TOK_INTEGER_TYPE:  return "INTEGER_TYPE";

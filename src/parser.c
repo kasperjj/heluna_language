@@ -81,7 +81,8 @@ static int is_name_token(TokenKind k) {
     case TOK_END: case TOK_MATCH: case TOK_WHEN: case TOK_BETWEEN:
     case TOK_AND: case TOK_OR: case TOK_NOT: case TOK_IN:
     case TOK_THROUGH: case TOK_MAP: case TOK_DO: case TOK_FILTER:
-    case TOK_WHERE:
+    case TOK_WHERE: case TOK_SOURCE: case TOK_SOURCES: case TOK_KEYED_BY:
+    case TOK_RETURNS: case TOK_LOOKUP:
         return 1;
     default:
         return 0;
@@ -168,7 +169,8 @@ static AstExpr *parse_accessors(Parser *p, AstExpr *base) {
                 k == TOK_WHERE || k == TOK_THROUGH || k == TOK_BETWEEN ||
                 k == TOK_FORBID || k == TOK_REQUIRE || k == TOK_REJECT ||
                 k == TOK_TAGGED || k == TOK_SANITIZERS || k == TOK_STRIPS ||
-                k == TOK_CONTRACT) {
+                k == TOK_CONTRACT || k == TOK_SOURCE || k == TOK_SOURCES ||
+                k == TOK_KEYED_BY || k == TOK_RETURNS || k == TOK_LOOKUP) {
                 advance(p);
                 const char *field = token_text(p, p->current);
                 AstExpr *acc = new_expr(p, EXPR_ACCESS, loc);
@@ -919,6 +921,50 @@ static AstExpr *parse_map_expr(Parser *p) {
     return node;
 }
 
+/* ── Lookup expression ───────────────────────────────────── */
+
+static AstExpr *parse_lookup_expr(Parser *p) {
+    SrcLoc loc = p->current.loc; /* on 'lookup' */
+
+    /* Source name is an identifier */
+    expect(p, TOK_IDENT);
+    if (p->had_error) return new_expr(p, EXPR_NOTHING, loc);
+    const char *source = ident_name(p);
+
+    expect(p, TOK_WHERE);
+    if (p->had_error) return new_expr(p, EXPR_NOTHING, loc);
+
+    /* Parse key bindings: name = expr (',' name = expr)* */
+    AstLookupKey *head = NULL;
+    AstLookupKey **tail = &head;
+
+    do {
+        expect_name(p);
+        if (p->had_error) break;
+        SrcLoc kloc = p->current.loc;
+        const char *kname = ident_name(p);
+
+        expect(p, TOK_EQ);
+        if (p->had_error) break;
+
+        AstExpr *value = parse_expression(p);
+
+        AstLookupKey *key = arena_calloc(p->arena, sizeof(AstLookupKey));
+        key->name = kname;
+        key->value = value;
+        key->loc = kloc;
+        *tail = key;
+        tail = &key->next;
+    } while (match(p, TOK_COMMA));
+
+    expect(p, TOK_END);
+
+    AstExpr *node = new_expr(p, EXPR_LOOKUP, loc);
+    node->as.lookup.source_name = source;
+    node->as.lookup.keys = head;
+    return node;
+}
+
 /* ── Expression dispatcher ───────────────────────────────── */
 
 static AstExpr *parse_expression(Parser *p) {
@@ -943,6 +989,10 @@ static AstExpr *parse_expression(Parser *p) {
         return parse_filter_expr(p);
     case TOK_MAP:
         return parse_map_expr(p);
+    case TOK_LOOKUP: {
+        advance(p);
+        return parse_lookup_expr(p);
+    }
     default:
         return parse_through_expr(p);
     }
@@ -1179,6 +1229,44 @@ static AstContract *parse_contract(Parser *p) {
         contract->tags = head;
     }
 
+    /* ── Determine contract kind ──────────────────────────── */
+    /* After uses and optional tags, peek to determine:
+     *   - 'source' keyword → source contract
+     *   - 'input' or 'sanitizers' or 'sources' → function contract
+     *   - at 'end' (nothing left) → tag contract (tags only)
+     */
+    if (peek(p) == TOK_SOURCE) {
+        /* Source contract */
+        contract->kind = CONTRACT_SOURCE;
+        advance(p); /* consume 'source' */
+
+        expect(p, TOK_STRING);
+        if (p->had_error) return contract;
+        contract->source_name = arena_strndup(p->arena, p->current.start,
+                                               (size_t)p->current.length);
+
+        expect(p, TOK_KEYED_BY);
+        if (p->had_error) return contract;
+        contract->keyed_by = parse_field_decl_list(p);
+
+        expect(p, TOK_RETURNS);
+        if (p->had_error) return contract;
+        contract->returns_type = parse_type(p);
+
+        expect(p, TOK_END);
+        return contract;
+    }
+
+    if (peek(p) == TOK_END && !contract->sanitizers && !contract->input) {
+        /* Tag contract — only tags (already parsed above) */
+        contract->kind = CONTRACT_TAG;
+        expect(p, TOK_END);
+        return contract;
+    }
+
+    /* Function contract */
+    contract->kind = CONTRACT_FUNCTION;
+
     /* Optional: sanitizers */
     if (peek(p) == TOK_SANITIZERS) {
         advance(p);
@@ -1217,6 +1305,23 @@ static AstContract *parse_contract(Parser *p) {
 
         expect(p, TOK_END);
         contract->sanitizers = head;
+    }
+
+    /* Optional: sources (function contract referencing source contracts) */
+    if (peek(p) == TOK_SOURCES) {
+        advance(p);
+        const char *names[64];
+        int count = 0;
+        do {
+            expect(p, TOK_IDENT);
+            if (p->had_error) return contract;
+            names[count++] = ident_name(p);
+        } while (match(p, TOK_COMMA));
+
+        contract->sources_refs = arena_alloc(p->arena, sizeof(char *) * (size_t)(count + 1));
+        for (int i = 0; i < count; i++) contract->sources_refs[i] = names[i];
+        contract->sources_refs[count] = NULL;
+        contract->sources_count = count;
     }
 
     /* input spec */
@@ -1482,11 +1587,13 @@ AstProgram *parser_parse(Parser *p) {
     prog->contract = parse_contract(p);
     if (p->had_error) return NULL;
 
-    /* Expect function def */
-    expect(p, TOK_DEFINE);
-    if (p->had_error) return NULL;
-    prog->function = parse_function_def(p);
-    if (p->had_error) return NULL;
+    /* Function def is required for function contracts, absent for tag/source */
+    if (prog->contract->kind == CONTRACT_FUNCTION) {
+        expect(p, TOK_DEFINE);
+        if (p->had_error) return NULL;
+        prog->function = parse_function_def(p);
+        if (p->had_error) return NULL;
+    }
 
     /* Should be at EOF (skip trailing comments) */
     if (peek(p) != TOK_EOF) {

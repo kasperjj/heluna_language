@@ -133,6 +133,15 @@ static int is_sanitizer(const Checker *c, const char *name) {
     return 0;
 }
 
+static int is_source(const Checker *c, const char *name) {
+    const AstContract *ct = c->prog->contract;
+    if (!ct->sources_refs) return 0;
+    for (int i = 0; i < ct->sources_count; i++) {
+        if (strcmp(ct->sources_refs[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
 /* ── Forward declarations ────────────────────────────────── */
 
 static void check_contract(Checker *c);
@@ -150,8 +159,47 @@ static void check_contract(Checker *c) {
     const AstContract    *ct = c->prog->contract;
     const AstFunctionDef *fn = c->prog->function;
 
+    /* Tag and source contracts have no function */
+    if (ct->kind == CONTRACT_TAG || ct->kind == CONTRACT_SOURCE) {
+        /* No duplicate tag definitions */
+        for (const AstTagDef *t = ct->tags; t; t = t->next) {
+            for (const AstTagDef *u = t->next; u; u = u->next) {
+                if (strcmp(t->name, u->name) == 0) {
+                    add_error(c, HELUNA_ERR_CONTRACT, u->loc,
+                              "duplicate tag definition '%s'", u->name);
+                }
+            }
+        }
+
+        /* Source contracts: check keyed-by and returns exist */
+        if (ct->kind == CONTRACT_SOURCE) {
+            if (!ct->source_name) {
+                add_error(c, HELUNA_ERR_CONTRACT, ct->loc,
+                          "source contract '%s' has no source name", ct->name);
+            }
+            if (!ct->keyed_by) {
+                add_error(c, HELUNA_ERR_CONTRACT, ct->loc,
+                          "source contract '%s' has no keyed-by fields", ct->name);
+            }
+            if (!ct->returns_type) {
+                add_error(c, HELUNA_ERR_CONTRACT, ct->loc,
+                          "source contract '%s' has no returns type", ct->name);
+            }
+        }
+
+        /* Tag contracts: must have at least one tag */
+        if (ct->kind == CONTRACT_TAG && !ct->tags) {
+            add_error(c, HELUNA_ERR_CONTRACT, ct->loc,
+                      "tag contract '%s' has no tags", ct->name);
+        }
+
+        return;
+    }
+
+    /* Function contract checks below */
+
     /* Contract name must match function name */
-    if (strcmp(ct->name, fn->name) != 0) {
+    if (fn && strcmp(ct->name, fn->name) != 0) {
         add_error(c, HELUNA_ERR_CONTRACT, fn->loc,
                   "function name '%s' does not match contract name '%s'",
                   fn->name, ct->name);
@@ -564,6 +612,18 @@ static void check_expr(Checker *c, AstExpr *e) {
     case EXPR_PAREN:
         check_expr(c, e->as.paren.inner);
         break;
+
+    case EXPR_LOOKUP: {
+        const char *source = e->as.lookup.source_name;
+        if (!is_source(c, source)) {
+            add_error(c, HELUNA_ERR_CONTRACT, e->loc,
+                      "lookup references undeclared source '%s'", source);
+        }
+        for (AstLookupKey *lk = e->as.lookup.keys; lk; lk = lk->next) {
+            check_expr(c, lk->value);
+        }
+        break;
+    }
     }
 }
 
@@ -595,6 +655,11 @@ void checker_init(Checker *c, const AstProgram *prog, Arena *arena) {
 
 int checker_check(Checker *c) {
     check_contract(c);
+
+    /* Tag and source contracts have no function body to check */
+    if (c->prog->contract->kind != CONTRACT_FUNCTION)
+        return c->errors.count;
+
     check_tags(c);
     check_sanitizers(c);
     check_rules(c);

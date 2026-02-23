@@ -34,6 +34,7 @@ typedef enum {
     EXPR_LIST,
     EXPR_ACCESS,
     EXPR_PAREN,
+    EXPR_LOOKUP,
 } AstExprKind;
 
 typedef enum {
@@ -48,6 +49,13 @@ typedef struct AstLabel {
     struct AstLabel *next;
     SrcLoc           loc;
 } AstLabel;
+
+typedef struct AstLookupKey {
+    const char          *name;
+    AstExpr             *value;
+    struct AstLookupKey *next;
+    SrcLoc               loc;
+} AstLookupKey;
 
 typedef struct AstWhenClause {
     AstPattern           *pattern;
@@ -138,6 +146,12 @@ struct AstExpr {
 
         /* EXPR_PAREN */
         struct { AstExpr *inner; } paren;
+
+        /* EXPR_LOOKUP */
+        struct {
+            const char   *source_name;
+            AstLookupKey *keys;
+        } lookup;
     } as;
 };
 
@@ -226,6 +240,14 @@ struct AstType {
     } as;
 };
 
+/* ── Contract kinds ───────────────────────────────────────── */
+
+typedef enum {
+    CONTRACT_FUNCTION,   /* input/output/rules/tests */
+    CONTRACT_TAG,        /* tags only — reusable security vocabulary */
+    CONTRACT_SOURCE,     /* source/keyed-by/returns — external data dependency */
+} AstContractKind;
+
 /* ── Contract-level declarations ──────────────────────────── */
 
 typedef struct AstTagDef {
@@ -302,16 +324,27 @@ typedef struct AstTestCase {
 } AstTestCase;
 
 typedef struct AstContract {
-    const char     *name;
-    const char    **uses;       /* NULL-terminated, or NULL */
-    int             uses_count;
-    AstTagDef      *tags;
-    AstSanitizerDef *sanitizers;
-    AstFieldDecl   *input;
-    AstFieldDecl   *output;
-    AstRule        *rules;
-    AstTestCase    *tests;
-    SrcLoc          loc;
+    const char       *name;
+    AstContractKind   kind;
+    const char      **uses;       /* NULL-terminated, or NULL */
+    int               uses_count;
+    AstTagDef        *tags;
+
+    /* Function contract fields */
+    AstSanitizerDef  *sanitizers;
+    const char      **sources_refs;  /* NULL-terminated source names, or NULL */
+    int               sources_count;
+    AstFieldDecl     *input;
+    AstFieldDecl     *output;
+    AstRule          *rules;
+    AstTestCase      *tests;
+
+    /* Source contract fields */
+    const char       *source_name;   /* the collection name string */
+    AstFieldDecl     *keyed_by;      /* key field declarations */
+    AstType          *returns_type;  /* return type */
+
+    SrcLoc            loc;
 } AstContract;
 
 typedef struct AstFunctionDef {
