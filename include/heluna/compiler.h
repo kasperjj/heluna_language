@@ -180,6 +180,13 @@ typedef struct {
     Arena       *arena;
 } CompilerErrors;
 
+/* ── Dependency for inlining ─────────────────────────────── */
+
+typedef struct {
+    const char       *name;
+    const AstProgram *prog;
+} CompilerDep;
+
 /* ── Compiler struct ─────────────────────────────────────── */
 
 typedef struct {
@@ -229,6 +236,10 @@ typedef struct {
         int          bit_index;
     }                *tag_map;
     int               tag_map_count;
+
+    /* Dependencies for inlining */
+    CompilerDep      *deps;
+    int               dep_count;
 } Compiler;
 
 /* ── Packet result ───────────────────────────────────────── */
@@ -242,6 +253,10 @@ typedef struct {
 
 /* Initialize a compiler for a parsed + checked program. */
 void compiler_init(Compiler *c, const AstProgram *prog, Arena *arena);
+
+/* Initialize with dependency data for inlining. */
+void compiler_init_with_deps(Compiler *c, const AstProgram *prog, Arena *arena,
+                             CompilerDep *deps, int dep_count);
 
 /* Compile the program and produce a binary packet.
  * Returns a PacketResult with the packet data and size.

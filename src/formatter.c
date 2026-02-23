@@ -453,7 +453,10 @@ static void fmt_contract(const AstContract *c, FILE *out) {
         fprintf(out, "sanitizers\n");
         for (const AstSanitizerDef *sd = c->sanitizers; sd; sd = sd->next) {
             indent(out, 2);
-            fprintf(out, "%s strips", sd->name);
+            fprintf(out, "%s", sd->name);
+            if (sd->impl_name)
+                fprintf(out, " using %s", sd->impl_name);
+            fprintf(out, " strips");
             for (int i = 0; i < sd->stripped_count; i++)
                 fprintf(out, " %s", sd->stripped_tags[i]);
             if (sd->next) fprintf(out, ",");

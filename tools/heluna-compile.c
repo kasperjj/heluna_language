@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <libgen.h>
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -39,6 +40,107 @@ static char *read_file(const char *path) {
     buf[nread] = '\0';
     fclose(f);
     return buf;
+}
+
+/* ── Stdlib name check ──────────────────────────────────── */
+
+static const char *stdlib_names[] = {
+    "upper","lower","trim","trim-start","trim-end","substring","replace",
+    "split","join","starts-with","ends-with","contains","length",
+    "pad-left","pad-right","regex-match","regex-replace",
+    "abs","ceil","floor","round","min","max","clamp",
+    "sort","sort-by","reverse","unique","flatten","zip","range","slice",
+    "keys","values","merge","pick","omit",
+    "parse-date","format-date","date-diff","date-add","now-date",
+    "base64-encode","base64-decode","url-encode","url-decode",
+    "json-encode","json-parse","sha256","hmac-sha256","uuid",
+    NULL
+};
+
+static int is_stdlib_name(const char *name) {
+    for (const char **s = stdlib_names; *s; s++) {
+        if (strcmp(*s, name) == 0) return 1;
+    }
+    return 0;
+}
+
+/* ── Dependency resolution ──────────────────────────────── */
+
+static char *dep_sources[64];
+static int   dep_source_count = 0;
+
+static int resolve_deps(const char *base_dir, Arena *arena,
+                        const AstProgram *prog,
+                        CompilerDep *deps, int *dep_count, int max_deps) {
+    const AstContract *ct = prog->contract;
+
+    for (int ui = 0; ui < ct->uses_count; ui++) {
+        const char *uname = ct->uses[ui];
+        int found = 0;
+        for (int i = 0; i < *dep_count; i++) {
+            if (strcmp(deps[i].name, uname) == 0) { found = 1; break; }
+        }
+        if (found || *dep_count >= max_deps) continue;
+
+        char dep_path[512];
+        snprintf(dep_path, sizeof dep_path, "%s/%s.heluna", base_dir, uname);
+        char *src = read_file(dep_path);
+        if (!src) continue;
+        dep_sources[dep_source_count++] = src;
+
+        Lexer lex;
+        lexer_init(&lex, src, dep_path, arena);
+        Parser parser;
+        parser_init(&parser, &lex, arena);
+        AstProgram *dep_prog = parser_parse(&parser);
+        if (parser.had_error) continue;
+
+        Checker checker;
+        checker_init(&checker, dep_prog, arena);
+        if (checker_check(&checker) > 0) continue;
+
+        deps[*dep_count].name = uname;
+        deps[*dep_count].prog = dep_prog;
+        (*dep_count)++;
+
+        resolve_deps(base_dir, arena, dep_prog, deps, dep_count, max_deps);
+    }
+
+    for (const AstSanitizerDef *s = ct->sanitizers; s; s = s->next) {
+        if (!s->impl_name || is_stdlib_name(s->impl_name)) continue;
+
+        int found = 0;
+        for (int i = 0; i < *dep_count; i++) {
+            if (strcmp(deps[i].name, s->impl_name) == 0) { found = 1; break; }
+        }
+        if (found || *dep_count >= max_deps) continue;
+
+        char dep_path[512];
+        snprintf(dep_path, sizeof dep_path, "%s/%s.heluna",
+                 base_dir, s->impl_name);
+        char *src = read_file(dep_path);
+        if (!src) continue;
+        dep_sources[dep_source_count++] = src;
+
+        Lexer lex;
+        lexer_init(&lex, src, dep_path, arena);
+        Parser parser;
+        parser_init(&parser, &lex, arena);
+        AstProgram *dep_prog = parser_parse(&parser);
+        if (parser.had_error) continue;
+
+        Checker checker;
+        checker_init(&checker, dep_prog, arena);
+        if (checker_check(&checker) > 0) continue;
+
+        deps[*dep_count].name = s->impl_name;
+        deps[*dep_count].prog = dep_prog;
+        (*dep_count)++;
+
+        resolve_deps(base_dir, arena, dep_prog, deps, dep_count, max_deps);
+    }
+
+    return 0;
 }
 
 static char *default_output_path(const char *input_path) {
@@ -106,9 +208,21 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* Resolve dependencies */
+    char *input_copy = strdup(input_path);
+    const char *base_dir = dirname(input_copy);
+    CompilerDep deps[32];
+    int dep_count = 0;
+    resolve_deps(base_dir, arena, prog, deps, &dep_count, 32);
+    free(input_copy);
+
     /* Compile */
     Compiler compiler;
-    compiler_init(&compiler, prog, arena);
+    if (dep_count > 0) {
+        compiler_init_with_deps(&compiler, prog, arena, deps, dep_count);
+    } else {
+        compiler_init(&compiler, prog, arena);
+    }
     PacketResult packet = compiler_compile(&compiler);
 
     if (compiler.errors.count > 0) {
@@ -160,6 +274,7 @@ int main(int argc, char **argv) {
 
     printf("%s → %s (%zu bytes)\n", input_path, output_path, packet.size);
 
+    for (int i = 0; i < dep_source_count; i++) free(dep_sources[i]);
     free(default_out);
     arena_destroy(arena);
     free(source);

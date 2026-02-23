@@ -1294,6 +1294,65 @@ static void test_field_ref_deep_accessor(void) {
     TEARDOWN();
 }
 
+/* ── Sanitizer using clause tests ─────────────────────────── */
+
+static void test_sanitizer_using_clause(void) {
+    PARSE(
+        "contract t\n"
+        "  tags\n"
+        "    pii \"personal info\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    hash using sha256 strips pii\n"
+        "  end\n"
+        "  input x as string tagged pii end\n"
+        "  output y as string end\n"
+        "  rules\n"
+        "    forbid tagged pii in output\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: hash({ value: $x }) }\n"
+        "end\n"
+    );
+    ASSERT(!parser.had_error, "using clause: no parse error");
+    ASSERT(prog != NULL, "using clause: prog not null");
+    ASSERT(prog->contract->sanitizers != NULL, "using clause: has sanitizers");
+    ASSERT(strcmp(prog->contract->sanitizers->name, "hash") == 0,
+           "using clause: sanitizer name is hash");
+    ASSERT(prog->contract->sanitizers->impl_name != NULL,
+           "using clause: impl_name not null");
+    ASSERT(strcmp(prog->contract->sanitizers->impl_name, "sha256") == 0,
+           "using clause: impl_name is sha256");
+    ASSERT(prog->contract->sanitizers->stripped_count == 1,
+           "using clause: strips 1 tag");
+    TEARDOWN();
+}
+
+static void test_sanitizer_without_using(void) {
+    PARSE(
+        "contract t\n"
+        "  tags\n"
+        "    pii \"personal info\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    hash strips pii\n"
+        "  end\n"
+        "  input x as string tagged pii end\n"
+        "  output y as string end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: hash({ value: $x }) }\n"
+        "end\n"
+    );
+    ASSERT(!parser.had_error, "no-using clause: no parse error");
+    ASSERT(prog != NULL, "no-using clause: prog not null");
+    ASSERT(prog->contract->sanitizers != NULL, "no-using clause: has sanitizers");
+    ASSERT(prog->contract->sanitizers->impl_name == NULL,
+           "no-using clause: impl_name is null");
+    TEARDOWN();
+}
+
 /* ── Main ─────────────────────────────────────────────────── */
 
 int main(void) {
@@ -1339,6 +1398,10 @@ int main(void) {
     test_through_filter();
     test_through_map();
     test_if_without_else_error();
+
+    /* Using keyword in sanitizers */
+    test_sanitizer_using_clause();
+    test_sanitizer_without_using();
 
     /* Medium-priority gap tests */
     test_deep_accessor_chain();

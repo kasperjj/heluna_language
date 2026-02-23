@@ -9,7 +9,7 @@ contract enrich-order
   end
 
   sanitizers
-    hash strips restricted pii
+    hash using sha256 strips restricted pii
   end
 
   sources customers-source
@@ -31,7 +31,7 @@ contract enrich-order
   tests
     test "approved order"
       given { customer-id: "C001", order-total: 50.0 }
-      expect { approved: true, customer-hash: "abc" }
+      expect { approved: true, customer-hash: "a4906a54b9b8416b9a8136e3665eb9d5c1cab6e72830f662d9b80a0d68b46b07" }
     end
   end
 end

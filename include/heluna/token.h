@@ -19,6 +19,7 @@ typedef enum {
     /* Keywords — contracts */
     TOK_CONTRACT,
     TOK_USES,
+    TOK_USING,
     TOK_TAGS,
     TOK_TAGGED,
     TOK_SANITIZERS,

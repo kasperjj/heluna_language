@@ -427,6 +427,17 @@ static uint8_t ast_type_to_ftype(const AstType *t) {
     return FTYPE_STRING;
 }
 
+/* ── Dependency lookup ────────────────────────────────────── */
+
+static const AstProgram *find_dep(const Compiler *c, const char *name) {
+    for (int i = 0; i < c->dep_count; i++) {
+        if (strcmp(c->deps[i].name, name) == 0) {
+            return c->deps[i].prog;
+        }
+    }
+    return NULL;
+}
+
 /* ── Forward declarations ────────────────────────────────── */
 
 static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target);
@@ -434,6 +445,85 @@ static void compile_pattern_test(Compiler *c, const AstPattern *p,
                                  uint16_t subject_slot, uint16_t result_slot);
 static void compile_pattern_bindings(Compiler *c, const AstPattern *p,
                                      uint16_t subject_slot);
+
+/* ── Inline call helper ──────────────────────────────────── */
+
+static CompileResult compile_inline_call(Compiler *c, const AstProgram *dep,
+                                         CompileResult arg, uint16_t dest) {
+    int scope_mark = c->scope_count;
+
+    /* For each input field of the dependency, extract it from arg record */
+    for (const AstFieldDecl *f = dep->contract->input; f; f = f->next) {
+        uint16_t key_ci = add_const_string(c, f->name, (int)strlen(f->name));
+        uint16_t key_slot = scratch_alloc(c);
+        emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
+             key_slot, key_ci, 0);
+        uint16_t field_slot = scratch_alloc(c);
+        emit(c, OP_RECORD_GET, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
+             field_slot, arg.slot, key_slot);
+        scope_push(c, f->name, field_slot, ast_type_to_ctype(f->type));
+    }
+
+    /* Compile the dependency's function body */
+    CompileResult body = compile_expr(c, dep->function->body, dest);
+
+    /* Pop inlined scope */
+    c->scope_count = scope_mark;
+    return body;
+}
+
+/* ── Shared call resolver (4-step cascade) ───────────────── */
+
+typedef struct {
+    int          resolved;    /* 1 = resolved, 0 = unresolved */
+    int          is_sanitizer;
+    uint8_t      tag_mode;
+    const char  *impl_name;  /* resolved implementation name (for sanitizers with using) */
+    uint16_t     func_id;    /* stdlib func_id, or 0 */
+    int          is_stdlib;
+    int          is_inline;
+    const AstProgram *inline_dep;
+} CallResolution;
+
+static CallResolution resolve_call(const Compiler *c, const char *name) {
+    CallResolution res = {0};
+    res.tag_mode = TMODE_PROPAGATE;
+    const char *resolved_name = name;
+
+    /* Step 1: Is it a sanitizer? */
+    for (const AstSanitizerDef *s = c->prog->contract->sanitizers; s; s = s->next) {
+        if (strcmp(s->name, name) == 0) {
+            res.is_sanitizer = 1;
+            res.tag_mode = TMODE_CLEAR;
+            /* Use impl_name if provided, otherwise fall back to sanitizer name */
+            resolved_name = s->impl_name ? s->impl_name : name;
+            break;
+        }
+    }
+
+    /* Step 2: Is the resolved name a stdlib function? */
+    if (stdlib_lookup(resolved_name, &res.func_id)) {
+        res.is_stdlib = 1;
+        res.resolved = 1;
+        res.impl_name = resolved_name;
+        return res;
+    }
+
+    /* Step 3: Is it a uses dependency (for inlining)? */
+    const AstProgram *dep = find_dep(c, resolved_name);
+    if (dep && dep->function) {
+        res.is_inline = 1;
+        res.inline_dep = dep;
+        res.resolved = 1;
+        res.impl_name = resolved_name;
+        return res;
+    }
+
+    /* Step 4: Unresolved — still return what we know */
+    res.resolved = 0;
+    res.impl_name = resolved_name;
+    return res;
+}
 
 /* ── Expression compilation ──────────────────────────────── */
 
@@ -877,15 +967,20 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
             emit(c, conv_op, make_flags(conv_hint, TMODE_PROPAGATE),
                  conv_slot, val_slot, 0);
 
-            /* Wrap in { value: result } record */
-            emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                 dest, 0, 0);
-            emit(c, OP_RECORD_SET, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                 dest, vkey_slot, conv_slot);
-
-            r.slot = dest;
-            r.type = CTYPE_RECORD;
-            (void)conv_type;
+            /* to-string wraps result in { value: result } record (evaluator does this);
+             * to-float and to-integer return bare values (evaluator returns bare). */
+            if (strcmp(name, "to-string") == 0) {
+                emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                     dest, 0, 0);
+                emit(c, OP_RECORD_SET, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                     dest, vkey_slot, conv_slot);
+                r.slot = dest;
+                r.type = CTYPE_RECORD;
+            } else {
+                /* to-float and to-integer return the converted value directly */
+                r.slot = conv_slot;
+                r.type = conv_type;
+            }
             break;
         }
 
@@ -949,46 +1044,30 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
             /* Fall through to generic call if fold args not recognized */
         }
 
-        /* Generic stdlib call or sanitizer call */
-        uint16_t func_id;
-        uint8_t tag_mode = TMODE_PROPAGATE;
-
-        /* Check if it's a sanitizer */
-        const AstContract *ct = c->prog->contract;
-        int is_sanitizer = 0;
-        for (const AstSanitizerDef *s = ct->sanitizers; s; s = s->next) {
-            if (strcmp(s->name, name) == 0) {
-                is_sanitizer = 1;
-                tag_mode = TMODE_CLEAR;
-                break;
-            }
-        }
-
-        if (is_sanitizer) {
-            /* Sanitizers are implemented as stdlib calls; we need to find
-             * which stdlib function implements the sanitizer. For now we
-             * look it up by name in the stdlib table. */
-            if (!stdlib_lookup(name, &func_id)) {
-                /* Sanitizer name is not a stdlib function — it might be
-                 * a uses function. Use func_id 0 as placeholder. */
-                func_id = 0;
-            }
-        } else if (!stdlib_lookup(name, &func_id)) {
-            /* Not a known stdlib function — could be a `uses` function.
-             * Emit a placeholder. */
-            func_id = 0;
-        }
-
-        if (func_id != 0) {
-            track_stdlib(c, func_id);
-        }
-
+        /* Generic call: sanitizer / stdlib / uses-dep via 4-step resolve */
+        CallResolution cr = resolve_call(c, name);
         CompileResult arg = compile_expr(c, e->as.call.arg, -1);
-        emit(c, OP_STDLIB_CALL,
-             make_flags(THINT_UNSPECIFIED, tag_mode),
-             dest, func_id, arg.slot);
-        r.slot = dest;
-        r.type = CTYPE_UNKNOWN;
+
+        if (cr.is_stdlib) {
+            track_stdlib(c, cr.func_id);
+            emit(c, OP_STDLIB_CALL,
+                 make_flags(THINT_UNSPECIFIED, cr.tag_mode),
+                 dest, cr.func_id, arg.slot);
+            r.slot = dest;
+            r.type = CTYPE_UNKNOWN;
+        } else if (cr.is_inline) {
+            r = compile_inline_call(c, cr.inline_dep, arg, dest);
+            /* Apply sanitizer tag clearing if needed */
+            if (cr.is_sanitizer) {
+                emit(c, OP_TAG_SET, make_flags(THINT_UNSPECIFIED, TMODE_CLEAR),
+                     r.slot, 0, 0);
+            }
+        } else {
+            add_error(c, HELUNA_ERR_CONTRACT, e->loc,
+                      "unresolved function '%s'", name);
+            r.slot = dest;
+            r.type = CTYPE_UNKNOWN;
+        }
         break;
     }
 
@@ -1107,27 +1186,28 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
                 break;
             }
 
-            uint16_t func_id = 0;
-            uint8_t tag_mode = TMODE_PROPAGATE;
+            /* Resolve via 4-step cascade */
+            CallResolution cr = resolve_call(c, fn_name);
 
-            /* Check sanitizer */
-            for (const AstSanitizerDef *s = c->prog->contract->sanitizers;
-                 s; s = s->next) {
-                if (strcmp(s->name, fn_name) == 0) {
-                    tag_mode = TMODE_CLEAR;
-                    break;
+            if (cr.is_stdlib) {
+                track_stdlib(c, cr.func_id);
+                emit(c, OP_STDLIB_CALL,
+                     make_flags(THINT_UNSPECIFIED, cr.tag_mode),
+                     dest, cr.func_id, arg.slot);
+                r.slot = dest;
+                r.type = CTYPE_UNKNOWN;
+            } else if (cr.is_inline) {
+                r = compile_inline_call(c, cr.inline_dep, arg, dest);
+                if (cr.is_sanitizer) {
+                    emit(c, OP_TAG_SET, make_flags(THINT_UNSPECIFIED, TMODE_CLEAR),
+                         r.slot, 0, 0);
                 }
+            } else {
+                add_error(c, HELUNA_ERR_CONTRACT, right->loc,
+                          "unresolved function '%s'", fn_name);
+                r.slot = dest;
+                r.type = CTYPE_UNKNOWN;
             }
-
-            if (stdlib_lookup(fn_name, &func_id)) {
-                track_stdlib(c, func_id);
-            }
-
-            emit(c, OP_STDLIB_CALL,
-                 make_flags(THINT_UNSPECIFIED, tag_mode),
-                 dest, func_id, arg.slot);
-            r.slot = dest;
-            r.type = CTYPE_UNKNOWN;
         } else if (right->kind == EXPR_FILTER) {
             /* Use left slot as source list for filter */
             uint16_t elem_slot = scratch_alloc(c);
@@ -1781,6 +1861,13 @@ void compiler_init(Compiler *c, const AstProgram *prog, Arena *arena) {
     c->prog  = prog;
     c->arena = arena;
     c->errors.arena = arena;
+}
+
+void compiler_init_with_deps(Compiler *c, const AstProgram *prog, Arena *arena,
+                             CompilerDep *deps, int dep_count) {
+    compiler_init(c, prog, arena);
+    c->deps = deps;
+    c->dep_count = dep_count;
 }
 
 PacketResult compiler_compile(Compiler *c) {

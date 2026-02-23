@@ -1,6 +1,7 @@
 # Tests tags, sanitizers, tagged fields, and forbid rules for data security
 
 contract patient-summary
+  uses bracket-age
 
   tags
     pii "personally identifiable information",
@@ -9,8 +10,8 @@ contract patient-summary
   end
 
   sanitizers
-    hash strips restricted pii phi,
-    bracket-age strips restricted pii
+    hash using sha256 strips restricted pii phi,
+    bracket-age using bracket-age strips restricted pii
   end
 
   input
@@ -44,7 +45,7 @@ contract patient-summary
         visit-count: 3
       }
       expect {
-        patient-hash: "a1b2c3",
+        patient-hash: "5d0ea1a5d9bae23fdce4fa5fa15692b18d2e9049ca190471f8dc13299252487e",
         age-range: "35-44",
         diagnosis-code: "J06.9",
         visit-count: 3
@@ -56,7 +57,7 @@ end
 define patient-summary with input
   result {
     patient-hash: hash({ value: $patient-name + $ssn }),
-    age-range: bracket-age({ date-of-birth: $date-of-birth }),
+    age-range: bracket-age({ date-of-birth: $date-of-birth }).value,
     diagnosis-code: $diagnosis-code,
     visit-count: $visit-count
   }

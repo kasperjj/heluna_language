@@ -885,6 +885,194 @@ static void test_given_extra_field(void) {
     TEARDOWN();
 }
 
+/* ── Sanitizer using clause validation ────────────────────── */
+
+static void test_sanitizer_using_stdlib(void) {
+    CHECK(
+        "contract t\n"
+        "  tags\n"
+        "    pii \"personal info\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    hash using sha256 strips pii\n"
+        "  end\n"
+        "  input x as string tagged pii end\n"
+        "  output y as string end\n"
+        "  rules\n"
+        "    forbid tagged pii in output\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: hash({ value: $x }) }\n"
+        "end\n"
+    );
+    ASSERT(nerrs == 0, "sanitizer using stdlib: 0 errors");
+    TEARDOWN();
+}
+
+static void test_sanitizer_using_uses_fn(void) {
+    CHECK(
+        "contract t\n"
+        "  uses my-hasher\n"
+        "  tags\n"
+        "    pii \"personal info\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    hash using my-hasher strips pii\n"
+        "  end\n"
+        "  input x as string tagged pii end\n"
+        "  output y as string end\n"
+        "  rules\n"
+        "    forbid tagged pii in output\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: hash({ value: $x }) }\n"
+        "end\n"
+    );
+    ASSERT(nerrs == 0, "sanitizer using uses-fn: 0 errors");
+    TEARDOWN();
+}
+
+static void test_sanitizer_using_unknown(void) {
+    CHECK(
+        "contract t\n"
+        "  tags\n"
+        "    pii \"personal info\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    hash using nonexistent-fn strips pii\n"
+        "  end\n"
+        "  input x as string tagged pii end\n"
+        "  output y as string end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: hash({ value: $x }) }\n"
+        "end\n"
+    );
+    ASSERT(nerrs > 0, "sanitizer using unknown: has errors");
+    ASSERT(has_error_containing(&checker, "nonexistent-fn"),
+           "sanitizer using unknown: mentions the bad name");
+    TEARDOWN();
+}
+
+/* ── Acyclicity checking ─────────────────────────────────── */
+
+static void test_acyclicity_no_cycle(void) {
+    /* A depends on B, no cycle */
+    const char *a_deps[] = { "B" };
+    const char *b_deps[] = { NULL };
+    DepGraphNode nodes[2] = {
+        { "A", a_deps, 1 },
+        { "B", (const char **)b_deps, 0 },
+    };
+    DepGraph graph = { nodes, 2 };
+
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x }\n"
+        "end\n"
+    );
+    /* Re-init with deps */
+    if (prog) {
+        checker_init_with_deps(&checker, prog, arena, &graph);
+        nerrs = checker_check(&checker);
+    }
+    ASSERT(nerrs == 0, "acyclicity no cycle: 0 errors");
+    TEARDOWN();
+}
+
+static void test_acyclicity_direct_cycle(void) {
+    /* A depends on B, B depends on A */
+    const char *a_deps[] = { "B" };
+    const char *b_deps[] = { "A" };
+    DepGraphNode nodes[2] = {
+        { "A", a_deps, 1 },
+        { "B", b_deps, 1 },
+    };
+    DepGraph graph = { nodes, 2 };
+
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x }\n"
+        "end\n"
+    );
+    if (prog) {
+        checker_init_with_deps(&checker, prog, arena, &graph);
+        nerrs = checker_check(&checker);
+    }
+    ASSERT(nerrs > 0, "acyclicity direct cycle: has errors");
+    ASSERT(has_error_containing(&checker, "cycle"),
+           "acyclicity direct cycle: mentions cycle");
+    TEARDOWN();
+}
+
+static void test_acyclicity_transitive_cycle(void) {
+    /* A -> B -> C -> A */
+    const char *a_deps[] = { "B" };
+    const char *b_deps[] = { "C" };
+    const char *c_deps[] = { "A" };
+    DepGraphNode nodes[3] = {
+        { "A", a_deps, 1 },
+        { "B", b_deps, 1 },
+        { "C", c_deps, 1 },
+    };
+    DepGraph graph = { nodes, 3 };
+
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x }\n"
+        "end\n"
+    );
+    if (prog) {
+        checker_init_with_deps(&checker, prog, arena, &graph);
+        nerrs = checker_check(&checker);
+    }
+    ASSERT(nerrs > 0, "acyclicity transitive cycle: has errors");
+    ASSERT(has_error_containing(&checker, "cycle"),
+           "acyclicity transitive cycle: mentions cycle");
+    TEARDOWN();
+}
+
+static void test_acyclicity_self_cycle(void) {
+    /* A depends on itself */
+    const char *a_deps[] = { "A" };
+    DepGraphNode nodes[1] = {
+        { "A", a_deps, 1 },
+    };
+    DepGraph graph = { nodes, 1 };
+
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x }\n"
+        "end\n"
+    );
+    if (prog) {
+        checker_init_with_deps(&checker, prog, arena, &graph);
+        nerrs = checker_check(&checker);
+    }
+    ASSERT(nerrs > 0, "acyclicity self cycle: has errors");
+    ASSERT(has_error_containing(&checker, "cycle"),
+           "acyclicity self cycle: mentions cycle");
+    TEARDOWN();
+}
+
 /* ── Main ─────────────────────────────────────────────────── */
 
 int main(void) {
@@ -943,6 +1131,17 @@ int main(void) {
     test_given_unknown_field();
     test_expect_unknown_field();
     test_given_extra_field();
+
+    /* Sanitizer using clause */
+    test_sanitizer_using_stdlib();
+    test_sanitizer_using_uses_fn();
+    test_sanitizer_using_unknown();
+
+    /* Acyclicity checking */
+    test_acyclicity_no_cycle();
+    test_acyclicity_direct_cycle();
+    test_acyclicity_transitive_cycle();
+    test_acyclicity_self_cycle();
 
     printf("  %d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;

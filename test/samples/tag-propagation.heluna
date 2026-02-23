@@ -8,7 +8,7 @@ contract tag-propagation
   end
 
   sanitizers
-    hash strips secret internal
+    hash using sha256 strips secret internal
   end
 
   input
@@ -30,7 +30,7 @@ contract tag-propagation
   tests
     test "tags stripped by sanitizer"
       given { api-key: "sk-12345", label: "production", public-note: "ready" }
-      expect { safe-id: "abc123", display: "ready" }
+      expect { safe-id: "c11e7177eb60c80cf983ddf8ca98f2dc1272d4c612204ce9bedd2460b18939cc", display: "ready" }
     end
   end
 end

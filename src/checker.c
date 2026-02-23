@@ -152,6 +152,7 @@ static void check_tests(Checker *c);
 static void check_function(Checker *c);
 static void check_expr(Checker *c, AstExpr *e);
 static void check_pattern_bindings(Checker *c, AstPattern *p);
+static void check_acyclicity(Checker *c);
 
 /* ── Contract structure checks ───────────────────────────── */
 
@@ -306,6 +307,15 @@ static void check_sanitizers(Checker *c) {
                 add_error(c, HELUNA_ERR_TAG, s->loc,
                           "sanitizer '%s' strips undeclared tag '%s'",
                           s->name, s->stripped_tags[i]);
+            }
+        }
+
+        /* Validate using clause: impl must be stdlib or uses function */
+        if (s->impl_name) {
+            if (!is_stdlib(s->impl_name) && !is_uses(c, s->impl_name)) {
+                add_error(c, HELUNA_ERR_CONTRACT, s->loc,
+                          "sanitizer '%s' using '%s': not a stdlib or uses function",
+                          s->name, s->impl_name);
             }
         }
     }
@@ -639,6 +649,77 @@ static void check_function(Checker *c) {
     check_expr(c, c->prog->function->body);
 }
 
+/* ── Acyclicity check (DFS) ──────────────────────────────── */
+
+#define DFS_UNVISITED  0
+#define DFS_IN_PROGRESS 1
+#define DFS_DONE       2
+
+static int find_dep_node(const DepGraph *g, const char *name) {
+    for (int i = 0; i < g->count; i++) {
+        if (strcmp(g->nodes[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static int dfs_visit(Checker *c, const DepGraph *g, int node_idx,
+                     int *state, int *path, int path_len) {
+    state[node_idx] = DFS_IN_PROGRESS;
+    path[path_len] = node_idx;
+    path_len++;
+
+    const DepGraphNode *n = &g->nodes[node_idx];
+    for (int d = 0; d < n->dep_count; d++) {
+        int dep_idx = find_dep_node(g, n->deps[d]);
+        if (dep_idx < 0) continue; /* external dep — skip */
+
+        if (state[dep_idx] == DFS_IN_PROGRESS) {
+            /* Cycle detected — build path string */
+            char msg[512];
+            int pos = 0;
+            pos += snprintf(msg + pos, sizeof(msg) - (size_t)pos,
+                            "dependency cycle: ");
+            /* Find where the cycle starts in the path */
+            int start = 0;
+            for (int i = 0; i < path_len; i++) {
+                if (path[i] == dep_idx) { start = i; break; }
+            }
+            for (int i = start; i < path_len && pos < (int)sizeof(msg) - 20; i++) {
+                if (i > start) pos += snprintf(msg + pos, sizeof(msg) - (size_t)pos, " -> ");
+                pos += snprintf(msg + pos, sizeof(msg) - (size_t)pos,
+                                "%s", g->nodes[path[i]].name);
+            }
+            snprintf(msg + pos, sizeof(msg) - (size_t)pos,
+                     " -> %s", g->nodes[dep_idx].name);
+            add_error(c, HELUNA_ERR_CONTRACT, c->prog->contract->loc,
+                      "%s", msg);
+            return 1;
+        }
+        if (state[dep_idx] == DFS_UNVISITED) {
+            if (dfs_visit(c, g, dep_idx, state, path, path_len))
+                return 1;
+        }
+    }
+
+    state[node_idx] = DFS_DONE;
+    return 0;
+}
+
+static void check_acyclicity(Checker *c) {
+    if (!c->deps || c->deps->count == 0) return;
+
+    const DepGraph *g = c->deps;
+    int *state = arena_calloc(c->arena, (size_t)g->count * sizeof(int));
+    int *path = arena_alloc(c->arena, (size_t)g->count * sizeof(int));
+
+    for (int i = 0; i < g->count; i++) {
+        if (state[i] == DFS_UNVISITED) {
+            if (dfs_visit(c, g, i, state, path, 0))
+                return; /* stop at first cycle */
+        }
+    }
+}
+
 /* ── Public API ──────────────────────────────────────────── */
 
 void checker_init(Checker *c, const AstProgram *prog, Arena *arena) {
@@ -651,10 +732,20 @@ void checker_init(Checker *c, const AstProgram *prog, Arena *arena) {
     c->scope = NULL;
     c->scope_count = 0;
     c->scope_capacity = 0;
+    c->deps = NULL;
+}
+
+void checker_init_with_deps(Checker *c, const AstProgram *prog,
+                            Arena *arena, const DepGraph *deps) {
+    checker_init(c, prog, arena);
+    c->deps = deps;
 }
 
 int checker_check(Checker *c) {
     check_contract(c);
+
+    /* Acyclicity check (if dependency graph provided) */
+    if (c->deps) check_acyclicity(c);
 
     /* Tag and source contracts have no function body to check */
     if (c->prog->contract->kind != CONTRACT_FUNCTION)

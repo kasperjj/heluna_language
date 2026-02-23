@@ -27,6 +27,7 @@ Keyword       ::= 'contract' | 'uses' | 'tags' | 'tagged' | 'sanitizers'
                  | 'and' | 'or' | 'not' | 'in' | 'through' | 'map' | 'do'
                  | 'filter' | 'where' | 'true' | 'false' | 'nothing'
                  | 'source' | 'sources' | 'keyed-by' | 'returns' | 'lookup'
+                 | 'using'
 
 (* ── Types ─────────────────────────────────────────────────── *)
 
@@ -175,7 +176,7 @@ TagDecl       ::= 'tags' TagDef (',' TagDef)* 'end'
 TagDef        ::= Identifier String?
 
 SanitizerDecl  ::= 'sanitizers' SanitizerDef+ 'end'
-SanitizerDef   ::= Identifier 'strips' Identifier+
+SanitizerDef   ::= Identifier ('using' Identifier)? 'strips' Identifier+
 
 SourceDecl    ::= 'source' String
 KeyedByDecl   ::= 'keyed-by' FieldDecl (',' FieldDecl)*

@@ -162,6 +162,7 @@ static void test_sample(const char *name) {
 
 static const char *samples[] = {
     "boolean-logic",
+    "bracket-age",
     "comments",
     "complex-types",
     "create-order",

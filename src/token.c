@@ -12,6 +12,7 @@ const char *token_kind_name(TokenKind kind) {
     case TOK_INPUT_REF:     return "INPUT_REF";
     case TOK_CONTRACT:      return "CONTRACT";
     case TOK_USES:          return "USES";
+    case TOK_USING:         return "USING";
     case TOK_TAGS:          return "TAGS";
     case TOK_TAGGED:        return "TAGGED";
     case TOK_SANITIZERS:    return "SANITIZERS";

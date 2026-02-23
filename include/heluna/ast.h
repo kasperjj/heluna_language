@@ -259,6 +259,7 @@ typedef struct AstTagDef {
 
 typedef struct AstSanitizerDef {
     const char            *name;
+    const char            *impl_name;    /* NULL if no 'using' clause */
     const char           **stripped_tags; /* NULL-terminated */
     int                    stripped_count;
     struct AstSanitizerDef *next;

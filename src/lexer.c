@@ -61,6 +61,7 @@ static const Keyword keywords[] = {
     { "through",    TOK_THROUGH },
     { "true",       TOK_TRUE },
     { "uses",       TOK_USES },
+    { "using",      TOK_USING },
     { "when",       TOK_WHEN },
     { "where",      TOK_WHERE },
     { "with",       TOK_WITH },

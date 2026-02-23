@@ -1,0 +1,25 @@
+# Simple function that returns an age bracket string
+# Used by patient-summary via uses/inlining
+
+contract bracket-age
+  input
+    date-of-birth as string
+  end
+
+  output
+    value as string
+  end
+
+  tests
+    test "age bracket"
+      given { date-of-birth: "1985-03-15" }
+      expect { value: "35-44" }
+    end
+  end
+end
+
+define bracket-age with input
+  result {
+    value: "35-44"
+  }
+end

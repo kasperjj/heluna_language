@@ -888,6 +888,230 @@ static void test_sanitizer_clear_tag_mode(void) {
     TEARDOWN();
 }
 
+/* ── Inlining tests ──────────────────────────────────────── */
+
+/* Helper: parse + check a dependency program */
+static AstProgram *parse_dep(Arena *arena, const char *src) {
+    Lexer lex;
+    lexer_init(&lex, src, "dep", arena);
+    Parser parser;
+    parser_init(&parser, &lex, arena);
+    AstProgram *prog = parser_parse(&parser);
+    if (parser.had_error || !prog) return NULL;
+    Checker checker;
+    checker_init(&checker, prog, arena);
+    if (checker_check(&checker) > 0) return NULL;
+    return prog;
+}
+
+static void test_inline_uses_call(void) {
+    Arena *arena = arena_create(64 * 1024);
+
+    /* Dependency: normalize-email trims and lowercases */
+    const char *dep_src =
+        "contract normalize-email\n"
+        "  input email as string end\n"
+        "  output email as string end\n"
+        "end\n"
+        "define normalize-email with input\n"
+        "  result { email: $email through trim({}) through lower({}) }\n"
+        "end\n";
+    AstProgram *dep_prog = parse_dep(arena, dep_src);
+    ASSERT(dep_prog != NULL, "inline: dep parsed");
+
+    /* Main contract uses normalize-email */
+    const char *main_src =
+        "contract t\n"
+        "  uses normalize-email\n"
+        "  input email as string end\n"
+        "  output email as string end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { email: normalize-email({ email: $email }).email }\n"
+        "end\n";
+
+    Lexer lex;
+    lexer_init(&lex, main_src, "test", arena);
+    Parser parser;
+    parser_init(&parser, &lex, arena);
+    AstProgram *prog = parser_parse(&parser);
+    ASSERT(!parser.had_error, "inline: main parsed");
+    ASSERT(prog != NULL, "inline: prog not null");
+
+    if (prog) {
+        Checker checker;
+        checker_init(&checker, prog, arena);
+        int nerrs = checker_check(&checker);
+        ASSERT(nerrs == 0, "inline: check ok");
+
+        if (nerrs == 0) {
+            CompilerDep deps[1];
+            deps[0].name = "normalize-email";
+            deps[0].prog = dep_prog;
+
+            Compiler compiler;
+            compiler_init_with_deps(&compiler, prog, arena, deps, 1);
+            PacketResult packet = compiler_compile(&compiler);
+
+            ASSERT(packet.data != NULL, "inline: packet produced");
+            ASSERT(compiler.errors.count == 0, "inline: no errors");
+            /* Should have RECORD_GET for extracting dep input fields */
+            ASSERT(find_instr(&compiler, OP_RECORD_GET) >= 0,
+                   "inline: RECORD_GET for field extraction");
+            /* Should NOT have STDLIB_CALL with func_id=0 placeholder */
+            int sc = find_instr(&compiler, OP_STDLIB_CALL);
+            if (sc >= 0) {
+                /* All STDLIB_CALLs should have non-zero func_id */
+                int has_zero = 0;
+                for (int i = 0; i < compiler.instr_count; i++) {
+                    if (compiler.instructions[i].opcode == OP_STDLIB_CALL &&
+                        compiler.instructions[i].operand1 == 0) {
+                        has_zero = 1;
+                    }
+                }
+                ASSERT(!has_zero, "inline: no func_id=0 placeholder");
+            }
+        }
+    }
+
+    arena_destroy(arena);
+}
+
+static void test_sanitizer_using_stdlib_compile(void) {
+    COMPILE(
+        "contract t\n"
+        "  tags\n"
+        "    secret \"confidential\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    hash using sha256 strips secret\n"
+        "  end\n"
+        "  input x as string tagged secret end\n"
+        "  output y as string end\n"
+        "  rules\n"
+        "    forbid tagged secret in output\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: hash({ value: $x }) }\n"
+        "end\n"
+    );
+    ASSERT(packet.data != NULL, "using-stdlib: packet produced");
+    /* hash using sha256 → should resolve to stdlib sha256 (0x0070) */
+    int idx = find_instr(&compiler, OP_STDLIB_CALL);
+    ASSERT(idx >= 0, "using-stdlib: STDLIB_CALL emitted");
+    if (idx >= 0) {
+        ASSERT(compiler.instructions[idx].operand1 == 0x0070,
+               "using-stdlib: func_id is sha256 (0x0070)");
+        uint8_t tm = (compiler.instructions[idx].flags >> 3) & 0x03;
+        ASSERT(tm == TMODE_CLEAR, "using-stdlib: tag mode is CLEAR");
+    }
+    TEARDOWN();
+}
+
+static void test_unresolved_call_error(void) {
+    Arena *arena = arena_create(64 * 1024);
+
+    const char *src =
+        "contract t\n"
+        "  uses missing-fn\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: missing-fn({ value: $x }) }\n"
+        "end\n";
+
+    Lexer lex;
+    lexer_init(&lex, src, "test", arena);
+    Parser parser;
+    parser_init(&parser, &lex, arena);
+    AstProgram *prog = parser_parse(&parser);
+    ASSERT(!parser.had_error, "unresolved: parse ok");
+
+    if (prog) {
+        Checker checker;
+        checker_init(&checker, prog, arena);
+        checker_check(&checker);
+
+        /* Compile without providing deps → should error */
+        Compiler compiler;
+        compiler_init(&compiler, prog, arena);
+        PacketResult packet = compiler_compile(&compiler);
+
+        ASSERT(packet.data == NULL, "unresolved: no packet");
+        ASSERT(compiler.errors.count > 0, "unresolved: has errors");
+    }
+    arena_destroy(arena);
+}
+
+static void test_sanitizer_using_inline_dep(void) {
+    Arena *arena = arena_create(64 * 1024);
+
+    /* Dependency: a simple function */
+    const char *dep_src =
+        "contract my-hasher\n"
+        "  input value as string end\n"
+        "  output value as string end\n"
+        "end\n"
+        "define my-hasher with input\n"
+        "  result { value: $value + \"-hashed\" }\n"
+        "end\n";
+    AstProgram *dep_prog = parse_dep(arena, dep_src);
+    ASSERT(dep_prog != NULL, "san-inline: dep parsed");
+
+    const char *main_src =
+        "contract t\n"
+        "  uses my-hasher\n"
+        "  tags\n"
+        "    secret \"confidential\"\n"
+        "  end\n"
+        "  sanitizers\n"
+        "    sanitize using my-hasher strips secret\n"
+        "  end\n"
+        "  input x as string tagged secret end\n"
+        "  output y as string end\n"
+        "  rules\n"
+        "    forbid tagged secret in output\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: sanitize({ value: $x }) }\n"
+        "end\n";
+
+    Lexer lex;
+    lexer_init(&lex, main_src, "test", arena);
+    Parser parser;
+    parser_init(&parser, &lex, arena);
+    AstProgram *prog = parser_parse(&parser);
+    ASSERT(!parser.had_error, "san-inline: main parsed");
+
+    if (prog) {
+        Checker checker;
+        checker_init(&checker, prog, arena);
+        int nerrs = checker_check(&checker);
+        ASSERT(nerrs == 0, "san-inline: check ok");
+
+        if (nerrs == 0) {
+            CompilerDep deps[1];
+            deps[0].name = "my-hasher";
+            deps[0].prog = dep_prog;
+
+            Compiler compiler;
+            compiler_init_with_deps(&compiler, prog, arena, deps, 1);
+            PacketResult packet = compiler_compile(&compiler);
+
+            ASSERT(packet.data != NULL, "san-inline: packet produced");
+            ASSERT(compiler.errors.count == 0, "san-inline: no errors");
+            /* Should inline the dep, not emit STDLIB_CALL */
+            ASSERT(find_instr(&compiler, OP_STR_CONCAT) >= 0,
+                   "san-inline: STR_CONCAT from inlined body");
+        }
+    }
+
+    arena_destroy(arena);
+}
+
 /* ── main ────────────────────────────────────────────────── */
 
 int main(void) {
@@ -960,6 +1184,12 @@ int main(void) {
     test_call_empty_record();
     test_eq_neq();
     test_sanitizer_clear_tag_mode();
+
+    /* Inlining and dependency resolution */
+    test_inline_uses_call();
+    test_sanitizer_using_stdlib_compile();
+    test_unresolved_call_error();
+    test_sanitizer_using_inline_dep();
 
     printf("  %d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;

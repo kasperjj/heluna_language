@@ -69,8 +69,9 @@ static int is_name_token(TokenKind k) {
     if (k == TOK_IDENT) return 1;
     /* All keywords are valid as field/label names in context */
     switch (k) {
-    case TOK_CONTRACT: case TOK_USES: case TOK_TAGS: case TOK_TAGGED:
-    case TOK_SANITIZERS: case TOK_STRIPS: case TOK_INPUT: case TOK_OUTPUT:
+    case TOK_CONTRACT: case TOK_USES: case TOK_USING: case TOK_TAGS:
+    case TOK_TAGGED: case TOK_SANITIZERS: case TOK_STRIPS:
+    case TOK_INPUT: case TOK_OUTPUT:
     case TOK_RULES: case TOK_FORBID: case TOK_REQUIRE: case TOK_REJECT:
     case TOK_TESTS: case TOK_TEST: case TOK_GIVEN: case TOK_EXPECT:
     case TOK_AS: case TOK_STRING_TYPE: case TOK_INTEGER_TYPE:
@@ -162,7 +163,7 @@ static AstExpr *parse_accessors(Parser *p, AstExpr *base) {
                 k == TOK_TEST || k == TOK_GIVEN || k == TOK_EXPECT ||
                 k == TOK_RESULT || k == TOK_LET || k == TOK_BE ||
                 k == TOK_DO || k == TOK_END || k == TOK_DEFINE ||
-                k == TOK_WITH || k == TOK_USES || k == TOK_AS ||
+                k == TOK_WITH || k == TOK_USES || k == TOK_USING || k == TOK_AS ||
                 k == TOK_OF || k == TOK_WHEN || k == TOK_THEN ||
                 k == TOK_ELSE || k == TOK_IF || k == TOK_AND ||
                 k == TOK_OR || k == TOK_NOT || k == TOK_IN ||
@@ -1278,6 +1279,15 @@ static AstContract *parse_contract(Parser *p) {
             advance(p);
             const char *sname = ident_name(p);
 
+            /* Optional: using <impl-name> */
+            const char *impl = NULL;
+            if (peek(p) == TOK_USING) {
+                advance(p);
+                expect(p, TOK_IDENT);
+                if (p->had_error) break;
+                impl = ident_name(p);
+            }
+
             expect(p, TOK_STRIPS);
             if (p->had_error) break;
 
@@ -1290,6 +1300,7 @@ static AstContract *parse_contract(Parser *p) {
 
             AstSanitizerDef *sd = arena_calloc(p->arena, sizeof(AstSanitizerDef));
             sd->name = sname;
+            sd->impl_name = impl;
             sd->loc = sloc;
             if (count > 0) {
                 sd->stripped_tags = arena_alloc(p->arena, sizeof(char *) * (size_t)(count + 1));
