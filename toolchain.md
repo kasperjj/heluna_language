@@ -10,6 +10,7 @@ Command-line tools for the [Heluna](docs/introduction-to-heluna.md) programming 
 | `heluna-parse` | Parse a source file and dump the AST |
 | `heluna-check` | Validate a contract and function without running |
 | `heluna-fmt` | Format a source file to canonical style |
+| `heluna-compile` | Compile a function contract to a VM packet (`.hlna`) |
 | `heluna-run` | Execute a function with JSON input |
 | `heluna-test` | Run embedded test cases from a contract |
 
@@ -37,6 +38,7 @@ make test
 
 ```
 bin/heluna-lex test/samples/full-name.heluna
+bin/heluna-compile test/samples/full-name.heluna -o full-name.hlna
 ```
 
 ## Project Structure

@@ -17,13 +17,13 @@ make test         # Build and run all tests
 make clean        # Remove build/ and bin/
 ```
 
-Implemented tools: `bin/heluna-lex` (tokenizer), `bin/heluna-parse` (parser + AST printer), `bin/heluna-check` (static checker), and `bin/heluna-fmt` (source formatter).
+Implemented tools: `bin/heluna-lex` (tokenizer), `bin/heluna-parse` (parser + AST printer), `bin/heluna-check` (static checker), `bin/heluna-fmt` (source formatter), and `bin/heluna-compile` (bytecode compiler).
 
 ## Architecture
 
 The toolchain is written in C11 (`-Wall -Wextra -Wpedantic`) and builds a static library (`build/libheluna.a`) that CLI tools link against.
 
-**Pipeline:** source → lexer → parser → checker → evaluator (planned)
+**Pipeline:** source → lexer → parser → checker → evaluator / compiler
 
 ### Core library (`src/` → `build/libheluna.a`)
 
@@ -33,6 +33,7 @@ The toolchain is written in C11 (`-Wall -Wextra -Wpedantic`) and builds a static
 - **parser.c** — Recursive-descent parser. Consumes token stream from the lexer and builds a typed AST (`AstProgram`). Handles full Heluna grammar: three contract kinds (function, tag, source), function definitions, expressions (including `lookup`), patterns, and types.
 - **ast.c** — AST pretty-printer (`ast_print()`). Outputs S-expression representation of a parsed program.
 - **checker.c** — Static analysis pass. Validates contract structure (duplicate fields/tags/sanitizers/tests), tag coherence (undeclared tags in annotations and rules), sanitizer coherence, rule field references, test case fields against schemas, scope (no shadowing, undefined identifiers), function calls (stdlib, `uses`, sanitizers), and lookup source references.
+- **compiler.c** — Bytecode compiler. Translates a checked AST into a binary VM packet (`.hlna`) per `heluna-vm-spec.md`. Produces a self-contained packet with contract metadata, constant pool, stdlib dependency list, and bytecode instructions. Handles expression compilation, pattern matching, iteration (filter/map/fold), through pipelines, and type-aware opcode selection (e.g. `ADD` vs `STR_CONCAT`).
 - **formatter.c** — Source code formatter (`heluna_format()`). Emits canonically-formatted Heluna source from an AST. Round-trips through parse→format are idempotent. Comments are not preserved (stripped during parsing).
 - **errors.c** — Structured error reporting with source location (filename:line:col). Error kinds: SYNTAX, TYPE, CONTRACT, RUNTIME, TAG, IO.
 
@@ -42,7 +43,7 @@ Public API for the library. Each `.c` file has a corresponding header.
 
 ### CLI tools (`tools/`)
 
-One `.c` file per tool, linked against `libheluna.a`. `heluna-lex`, `heluna-parse`, `heluna-check`, and `heluna-fmt` are implemented. `heluna-run` and `heluna-test` are stubs.
+One `.c` file per tool, linked against `libheluna.a`. `heluna-lex`, `heluna-parse`, `heluna-check`, `heluna-fmt`, and `heluna-compile` are implemented. `heluna-run` and `heluna-test` are stubs.
 
 ### Tests (`test/`)
 
@@ -53,6 +54,8 @@ Test binaries are built to `build/test/` and run sequentially by `make test`. Te
 - **test_parse_samples.c** — Integration tests: parses every `.heluna` sample and asserts no errors. Handles all three contract kinds (function, tag, source).
 - **test_checker.c** — Unit tests for the checker (~160 tests covering scope, shadowing, tags, sanitizers, rules, test case field validation, and error cases).
 - **test_check_samples.c** — Integration tests: parses and checks every `.heluna` sample with 0 errors.
+- **test_compiler.c** — Unit tests for the compiler (~40 tests covering scratchpad allocation, constant pool, literal/binary/control flow compilation, pattern matching, iteration, packet structure, and sanitizer tag modes).
+- **test_compile_samples.c** — Integration tests: compiles every `.heluna` sample and verifies packet structure (magic, sections, total_size). Tag/source contracts are skipped gracefully.
 - **test_fmt_samples.c** — Idempotency tests: for each sample, formats to string A, re-parses and formats to string B, asserts A == B, and checks semantic validity.
 
 Sample `.heluna` files live in `test/samples/`.
