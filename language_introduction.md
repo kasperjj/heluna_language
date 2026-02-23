@@ -558,6 +558,123 @@ The rules validate inputs *and* outputs. If someone calls this function with `qu
 
 ---
 
+## Reusable Tag Vocabularies: Tag Contracts
+
+In the patient-summary example above, the tags `pii`, `phi`, and `restricted` were declared inline. But what if multiple contracts across your system need the same security vocabulary? You'd end up duplicating tag definitions everywhere.
+
+Tag contracts solve this. A tag contract declares a reusable set of tags with no function — it exists purely to be referenced by other contracts via `uses`.
+
+```heluna
+contract company-security
+  tags
+    pii "personally identifiable information",
+    restricted "must not leave processing boundary"
+  end
+end
+```
+
+That's the entire file. No input, no output, no function. Any contract that writes `uses company-security` gains access to those tag definitions and can reference them in field annotations, sanitizer declarations, and rules.
+
+---
+
+## External Data: Source Contracts and Lookup
+
+Real transformations often need data beyond what's in the input record. A function might need to look up a customer record, check an inventory table, or reference a configuration set. Heluna handles this through **source contracts** and the **lookup** expression.
+
+### Source Contracts
+
+A source contract defines a read-only external data dependency — a named collection with a key and a return type.
+
+```heluna
+contract customers-source
+  uses company-security
+
+  tags
+    pii "personally identifiable information",
+    restricted "must not leave processing boundary"
+  end
+
+  source "customers"
+
+  keyed-by customer-id as string
+
+  returns record
+    customer-id as string,
+    name as string tagged pii,
+    credit-limit as float tagged restricted
+  end
+end
+```
+
+The `source` declaration names the external collection. `keyed-by` declares which fields form the lookup key and their types. `returns` declares the shape of the data that comes back — including tags, so the security system knows what sensitivity the looked-up data carries.
+
+Like tag contracts, source contracts have no function definition. They exist to be referenced.
+
+### Using Sources in Function Contracts
+
+A function contract declares which source contracts it depends on with the `sources` keyword. The function body can then use `lookup` to query them.
+
+```heluna
+contract enrich-order
+  uses company-security
+
+  tags
+    pii "personally identifiable information",
+    restricted "must not leave processing boundary"
+  end
+
+  sanitizers
+    hash strips restricted pii
+  end
+
+  sources customers-source
+
+  input
+    customer-id as string,
+    order-total as float
+  end
+
+  output
+    approved as boolean,
+    customer-hash as string
+  end
+
+  rules
+    forbid tagged restricted in output
+  end
+
+  tests
+    test "approved order"
+      given { customer-id: "C001", order-total: 50.0 }
+      expect { approved: true, customer-hash: "abc" }
+    end
+  end
+end
+
+define enrich-order with input
+  let customer be
+    lookup customers-source
+      where customer-id = $customer-id
+    end
+
+  let approved be match customer
+    when nothing then false
+    when c then $order-total <= c.credit-limit
+  end
+
+  result {
+    approved: approved,
+    customer-hash: hash({ value: $customer-id })
+  }
+end
+```
+
+The `lookup` expression queries a declared source by key and returns a `maybe record` — the result is either `nothing` (no match found) or the record defined by the source contract's `returns` type. You must handle both cases, typically with `match`.
+
+Notice how the source contract's tags flow through the lookup. The `credit-limit` field is tagged `restricted` in the source contract, so any value derived from `c.credit-limit` carries that tag. The `forbid tagged restricted in output` rule ensures no restricted data leaks into the output.
+
+---
+
 ## How Heluna Fits Into Your System
 
 Heluna is not a replacement for your application framework. It's a computation kernel that lives inside your host process. A typical integration looks like this:

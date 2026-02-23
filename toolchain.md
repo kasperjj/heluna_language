@@ -9,6 +9,7 @@ Command-line tools for the [Heluna](docs/introduction-to-heluna.md) programming 
 | `heluna-lex` | Tokenize a source file and print each token |
 | `heluna-parse` | Parse a source file and dump the AST |
 | `heluna-check` | Validate a contract and function without running |
+| `heluna-fmt` | Format a source file to canonical style |
 | `heluna-run` | Execute a function with JSON input |
 | `heluna-test` | Run embedded test cases from a contract |
 

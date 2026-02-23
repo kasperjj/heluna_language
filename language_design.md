@@ -58,6 +58,19 @@ Defense in Depth
 The tag system creates multiple layers of protection. Tags classify data at the boundary. Propagation tracks sensitivity through every computation. Sanitizers create explicit, auditable chokepoints where sensitive data is transformed. Rules enforce constraints against tag categories. And because Heluna functions are pure — no network calls, no file access, no side channels — there is no way for data to escape except through the output record, which the contract fully controls.
 This means that even if an LLM generates a function with a subtle bug, or a malicious actor attempts to exfiltrate data through a cleverly constructed transformation, the tag system catches it. The data cannot reach the output without passing through a declared sanitizer, and the contract makes every trust decision visible and auditable.
 
+### Polymorphic Contracts
+Not all contracts define functions. Heluna supports three contract kinds, each serving a distinct role:
+
+**Tag contracts** declare a reusable security vocabulary — a named set of tags with descriptions. They have no input, output, or function body. Other contracts reference them via `uses` to share a consistent tag vocabulary across a system. This prevents duplication and ensures that `pii` means the same thing everywhere.
+
+**Source contracts** declare read-only external data dependencies. They define a named collection (`source`), a key schema (`keyed-by`), and a return type (`returns`) — including tags on the returned fields. Source contracts describe the shape and sensitivity of external data without dictating how the host process retrieves it. The host resolves lookups; Heluna defines the contract.
+
+**Function contracts** are the original contract kind: input schema, output schema, rules, tests, and a function body. Function contracts can reference source contracts via a `sources` declaration, enabling their function bodies to use `lookup` expressions to query external data.
+
+This separation follows the same principle as the rest of Heluna: make dependencies explicit and auditable. A security reviewer can see every source of data a function touches by reading its contract alone — source names, key shapes, return types, and their tags are all declared up front.
+
+The `lookup` expression (`lookup source-name where key = expr end`) returns a `maybe record`, forcing the function author to handle the case where no data is found. Tags on the source contract's `returns` type propagate through the lookup result, so the tag system automatically tracks sensitivity of externally sourced data.
+
 ### Readable Over Terse
 Heluna uses English keywords where most languages use symbols. through instead of |>. and instead of &&. match...when...then...end instead of curly braces and arrows. result instead of implicit returns. The language reads almost like structured prose.
 

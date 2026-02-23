@@ -26,6 +26,7 @@ Keyword       ::= 'contract' | 'uses' | 'tags' | 'tagged' | 'sanitizers'
                  | 'then' | 'else' | 'end' | 'match' | 'when' | 'between'
                  | 'and' | 'or' | 'not' | 'in' | 'through' | 'map' | 'do'
                  | 'filter' | 'where' | 'true' | 'false' | 'nothing'
+                 | 'source' | 'sources' | 'keyed-by' | 'returns' | 'lookup'
 
 (* ── Types ─────────────────────────────────────────────────── *)
 
@@ -39,7 +40,7 @@ FieldDecl     ::= Name 'as' Type ('tagged' Identifier+)?
 (* ── Expressions ───────────────────────────────────────────── *)
 
 Expression    ::= LetExpr | IfExpr | MatchExpr | FilterExpr
-                 | MapExpr | ThroughExpr
+                 | MapExpr | LookupExpr | ThroughExpr
 
 (* Precedence (lowest to highest):
  *   through  <  or  <  and  <  not  <  compare  <  add/sub  <  mul/div/mod  <  unary neg  <  atom
@@ -111,13 +112,16 @@ RangePattern     ::= 'between' CompareExpr 'and' CompareExpr
 BindingPattern   ::= Identifier
 WildcardPattern  ::= '_'
 
-(* ── Let / Filter / Map ────────────────────────────────────── *)
+(* ── Let / Filter / Map / Lookup ───────────────────────────── *)
 
 LetExpr       ::= 'let' Identifier 'be' Expression
 
 FilterExpr    ::= 'filter' Expression 'where' Identifier BoolExpr 'end'
 
 MapExpr       ::= 'map' Expression 'as' Identifier 'do' Expression 'end'
+
+LookupExpr    ::= 'lookup' Identifier 'where' LookupKey (',' LookupKey)* 'end'
+LookupKey     ::= Name '=' Expression
 
 (* ── Function definition ───────────────────────────────────── *)
 
@@ -131,16 +135,39 @@ LetBinding    ::= 'let' Identifier 'be' Expression
 FunctionCall  ::= Identifier '(' RecordLiteral ')'
 
 (* ── Contract ──────────────────────────────────────────────── *)
+(*
+ * Three contract kinds are distinguished by what follows the optional
+ * uses/tags sections:
+ *   - 'source' keyword  → source contract (external data dependency)
+ *   - 'end' immediately → tag contract (reusable tag vocabulary)
+ *   - otherwise         → function contract (input/output/rules/tests)
+ *)
 
-Contract       ::= 'contract' Identifier
+Contract       ::= TagContract | SourceContract | FunctionContract
+
+TagContract    ::= 'contract' Identifier
+                    UsesDecl?
+                    TagDecl
+                    'end'
+
+SourceContract ::= 'contract' Identifier
                     UsesDecl?
                     TagDecl?
-                    SanitizerDecl?
-                    InputSpec
-                    OutputSpec
-                    RuleList?
-                    TestList?
+                    SourceDecl
+                    KeyedByDecl
+                    ReturnsDecl
                     'end'
+
+FunctionContract ::= 'contract' Identifier
+                      UsesDecl?
+                      TagDecl?
+                      SanitizerDecl?
+                      SourcesDecl?
+                      InputSpec
+                      OutputSpec
+                      RuleList?
+                      TestList?
+                      'end'
 
 UsesDecl      ::= 'uses' Identifier (',' Identifier)*
 
@@ -149,6 +176,11 @@ TagDef        ::= Identifier String?
 
 SanitizerDecl  ::= 'sanitizers' SanitizerDef+ 'end'
 SanitizerDef   ::= Identifier 'strips' Identifier+
+
+SourceDecl    ::= 'source' String
+KeyedByDecl   ::= 'keyed-by' FieldDecl (',' FieldDecl)*
+ReturnsDecl   ::= 'returns' Type
+SourcesDecl   ::= 'sources' Identifier (',' Identifier)*
 
 InputSpec     ::= 'input' FieldDecl (',' FieldDecl)* 'end'
 OutputSpec    ::= 'output' FieldDecl (',' FieldDecl)* 'end'
@@ -179,5 +211,11 @@ TestCase      ::= 'test' String
                    'end'
 
 (* ── Program ───────────────────────────────────────────────── *)
+(*
+ * Function contracts require a FunctionDef after the contract.
+ * Tag and source contracts stand alone with no function definition.
+ *)
 
-Program       ::= Contract FunctionDef
+Program       ::= FunctionContract FunctionDef
+               |  TagContract
+               |  SourceContract
