@@ -794,6 +794,97 @@ static void test_complex_valid_program(void) {
     TEARDOWN();
 }
 
+/* ── Test case field validation ────────────────────────────── */
+
+static void test_valid_test_case(void) {
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "  tests\n"
+        "    test \"basic\"\n"
+        "      given { x: 1 }\n"
+        "      expect { y: 2 }\n"
+        "    end\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x + 1 }\n"
+        "end\n"
+    );
+    ASSERT(nerrs == 0, "valid test case: 0 errors");
+    TEARDOWN();
+}
+
+static void test_given_unknown_field(void) {
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "  tests\n"
+        "    test \"bad given\"\n"
+        "      given { nonexistent: 1 }\n"
+        "      expect { y: 2 }\n"
+        "    end\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x }\n"
+        "end\n"
+    );
+    ASSERT(nerrs > 0, "given unknown field: has errors");
+    ASSERT(has_error_containing(&checker, "given field 'nonexistent'"),
+           "given unknown field: message");
+    TEARDOWN();
+}
+
+static void test_expect_unknown_field(void) {
+    CHECK(
+        "contract t\n"
+        "  input x as integer end\n"
+        "  output y as integer end\n"
+        "  tests\n"
+        "    test \"bad expect\"\n"
+        "      given { x: 1 }\n"
+        "      expect { nonexistent: 2 }\n"
+        "    end\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { y: $x }\n"
+        "end\n"
+    );
+    ASSERT(nerrs > 0, "expect unknown field: has errors");
+    ASSERT(has_error_containing(&checker, "expect field 'nonexistent'"),
+           "expect unknown field: message");
+    TEARDOWN();
+}
+
+static void test_given_extra_field(void) {
+    CHECK(
+        "contract t\n"
+        "  input\n"
+        "    x as integer,\n"
+        "    y as integer\n"
+        "  end\n"
+        "  output z as integer end\n"
+        "  tests\n"
+        "    test \"extra field\"\n"
+        "      given { x: 1, y: 2, extra: 3 }\n"
+        "      expect { z: 3 }\n"
+        "    end\n"
+        "  end\n"
+        "end\n"
+        "define t with input\n"
+        "  result { z: $x + $y }\n"
+        "end\n"
+    );
+    ASSERT(nerrs > 0, "given extra field: has errors");
+    ASSERT(has_error_containing(&checker, "given field 'extra'"),
+           "given extra field: message");
+    TEARDOWN();
+}
+
 /* ── Main ─────────────────────────────────────────────────── */
 
 int main(void) {
@@ -846,6 +937,12 @@ int main(void) {
     test_duplicate_sanitizer_def();
     test_through_pipeline();
     test_complex_valid_program();
+
+    /* Test case field validation */
+    test_valid_test_case();
+    test_given_unknown_field();
+    test_expect_unknown_field();
+    test_given_extra_field();
 
     printf("  %d/%d passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;

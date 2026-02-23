@@ -139,6 +139,7 @@ static void check_contract(Checker *c);
 static void check_tags(Checker *c);
 static void check_sanitizers(Checker *c);
 static void check_rules(Checker *c);
+static void check_tests(Checker *c);
 static void check_function(Checker *c);
 static void check_expr(Checker *c, AstExpr *e);
 static void check_pattern_bindings(Checker *c, AstPattern *p);
@@ -305,6 +306,36 @@ static void check_rules(Checker *c) {
         case RULE_MATCH:
             check_field_ref(c, r->as.match.field_ref);
             break;
+        }
+    }
+}
+
+/* ── Test case field validation ──────────────────────────── */
+
+static void check_tests(Checker *c) {
+    const AstContract *ct = c->prog->contract;
+
+    for (const AstTestCase *tc = ct->tests; tc; tc = tc->next) {
+        /* Validate given record fields against input schema */
+        if (tc->given && tc->given->kind == EXPR_RECORD) {
+            for (const AstLabel *l = tc->given->as.record.labels; l; l = l->next) {
+                if (!has_input_field(c, l->name)) {
+                    add_error(c, HELUNA_ERR_CONTRACT, l->loc,
+                              "test '%s' given field '%s' is not in contract input",
+                              tc->name, l->name);
+                }
+            }
+        }
+
+        /* Validate expect record fields against output schema */
+        if (tc->expect && tc->expect->kind == EXPR_RECORD) {
+            for (const AstLabel *l = tc->expect->as.record.labels; l; l = l->next) {
+                if (!has_output_field(c, l->name)) {
+                    add_error(c, HELUNA_ERR_CONTRACT, l->loc,
+                              "test '%s' expect field '%s' is not in contract output",
+                              tc->name, l->name);
+                }
+            }
         }
     }
 }
@@ -567,6 +598,7 @@ int checker_check(Checker *c) {
     check_tags(c);
     check_sanitizers(c);
     check_rules(c);
+    check_tests(c);
     check_function(c);
     return c->errors.count;
 }
