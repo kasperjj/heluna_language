@@ -56,4 +56,10 @@ Heluna is not a general-purpose programming language. It has no I/O, no concurre
 
 ---
 
+### Writing Heluna with an LLM
+
+Drop [`heluna-llm-context.md`](heluna-llm-context.md) into your LLM's context window (or system prompt). It contains the complete grammar, all stdlib function signatures, toolchain commands, language rules, and worked examples — everything an LLM needs to generate valid Heluna on the first try.
+
+---
+
 See [`language_introduction.md`](language_introduction.md) for a practical walkthrough with examples, and [`language_design.md`](language_design.md) for the design rationale.
