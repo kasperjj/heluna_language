@@ -177,6 +177,8 @@ VmPacket *vm_load_packet(const uint8_t *data, size_t size,
     SectionEntry sec_constants = {0, 0, 0};
     SectionEntry sec_stdlib = {0, 0, 0};
     SectionEntry sec_bytecode = {0, 0, 0};
+    SectionEntry sec_sources = {0, 0, 0};
+    int found_sources = 0;
 
     for (int i = 0; i < section_count; i++) {
         switch (sections[i].type) {
@@ -184,6 +186,7 @@ VmPacket *vm_load_packet(const uint8_t *data, size_t size,
         case SEC_CONSTANTS:   sec_constants = sections[i]; found[1] = 1; break;
         case SEC_STDLIB_DEPS: sec_stdlib    = sections[i]; found[2] = 1; break;
         case SEC_BYTECODE:    sec_bytecode  = sections[i]; found[3] = 1; break;
+        case SEC_SOURCES:     sec_sources   = sections[i]; found_sources = 1; break;
         }
     }
 
@@ -481,6 +484,42 @@ VmPacket *vm_load_packet(const uint8_t *data, size_t size,
         }
     }
 
+    /* ── Parse SOURCES section (optional) ── */
+    if (found_sources) {
+        Cursor c = { data, size, sec_sources.offset };
+        uint16_t count = read_u16_le(&c);
+        pkt->source_count = count;
+        if (count > 0) {
+            pkt->sources = arena_alloc(arena,
+                (size_t)count * sizeof(VmSource));
+            for (int i = 0; i < count; i++) {
+                /* name */
+                uint16_t nlen = read_u16_le(&c);
+                pkt->sources[i].name = arena_strndup(arena,
+                    (const char *)c.data + c.pos, nlen);
+                c.pos += nlen;
+                /* config_json */
+                uint16_t clen = read_u16_le(&c);
+                if (clen > 0) {
+                    pkt->sources[i].config_json = arena_strndup(arena,
+                        (const char *)c.data + c.pos, clen);
+                    c.pos += clen;
+                } else {
+                    pkt->sources[i].config_json = NULL;
+                }
+                /* keyed_by */
+                uint16_t klen = read_u16_le(&c);
+                if (klen > 0) {
+                    pkt->sources[i].keyed_by = arena_strndup(arena,
+                        (const char *)c.data + c.pos, klen);
+                    c.pos += klen;
+                } else {
+                    pkt->sources[i].keyed_by = NULL;
+                }
+            }
+        }
+    }
+
     return pkt;
 }
 
@@ -490,6 +529,10 @@ void vm_init(Vm *vm, VmPacket *packet, Arena *arena) {
     memset(vm, 0, sizeof(*vm));
     vm->packet = packet;
     vm->arena  = arena;
+    if (packet->source_count > 0) {
+        vm->source_cache = arena_calloc(arena,
+            (size_t)packet->source_count * sizeof(HVal *));
+    }
 }
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -1710,6 +1753,13 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                         }
                         break;
                     }
+                    case OP_SOURCE_LOOKUP: {
+                        HVal *skeys = vm->scratchpad[bo2].value;
+                        HVal *sresult = vm_source_resolve(vm, bo1, skeys);
+                        vm->scratchpad[bd].value = sresult ? sresult : make_nothing(arena);
+                        vm->scratchpad[bd].tags = 0;
+                        break;
+                    }
                     default:
                         break;
                     }
@@ -1824,6 +1874,16 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             }
             vm->scratchpad[d].value = make_boolean(arena,
                 (vm->scratchpad[o1].tags & bits) == bits);
+            vm->scratchpad[d].tags = 0;
+            result_slot = d;
+            break;
+        }
+
+        case OP_SOURCE_LOOKUP: {
+            int source_idx = o1;
+            HVal *keys = vm->scratchpad[o2].value;
+            HVal *result_val = vm_source_resolve(vm, source_idx, keys);
+            vm->scratchpad[d].value = result_val ? result_val : make_nothing(arena);
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;

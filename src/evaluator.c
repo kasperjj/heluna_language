@@ -608,6 +608,30 @@ static HVal *eval_expr(Evaluator *ev, const AstExpr *e) {
     case EXPR_LOOKUP:
         /* Phase 1: not supported */
         return make_nothing(ev->arena);
+
+    case EXPR_IS_TYPE: {
+        HVal *operand = eval_expr(ev, e->as.is_type.operand);
+        if (!operand) return NULL;
+        const char *tn = e->as.is_type.type_name;
+        int result = 0;
+        if (strcmp(tn, "string") == 0)       result = (operand->kind == VAL_STRING);
+        else if (strcmp(tn, "integer") == 0) result = (operand->kind == VAL_INTEGER);
+        else if (strcmp(tn, "float") == 0)   result = (operand->kind == VAL_FLOAT);
+        else if (strcmp(tn, "boolean") == 0) result = (operand->kind == VAL_BOOLEAN);
+        else if (strcmp(tn, "nothing") == 0) result = (operand->kind == VAL_NOTHING);
+        else if (strcmp(tn, "list") == 0)    result = (operand->kind == VAL_LIST);
+        else if (strcmp(tn, "record") == 0)  result = (operand->kind == VAL_RECORD);
+        return make_boolean(ev->arena, result);
+    }
+
+    case EXPR_OR_ELSE: {
+        HVal *primary = eval_expr(ev, e->as.or_else.primary);
+        if (!primary) return NULL;
+        if (primary->kind == VAL_NOTHING) {
+            return eval_expr(ev, e->as.or_else.fallback);
+        }
+        return primary;
+    }
     }
 
     eval_error(ev, e->loc, "unhandled expression kind %d", e->kind);

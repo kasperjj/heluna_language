@@ -22,6 +22,7 @@
 #define SEC_CONSTANTS        0x0002
 #define SEC_STDLIB_DEPS      0x0003
 #define SEC_BYTECODE         0x0004
+#define SEC_SOURCES          0x0005
 #define SEC_TESTS            0x0101
 
 /* ── Opcodes ─────────────────────────────────────────────── */
@@ -101,6 +102,9 @@
 /* Tag operations */
 #define OP_TAG_SET           0xB0
 #define OP_TAG_CHECK         0xB1
+
+/* Source lookup */
+#define OP_SOURCE_LOOKUP     0xC0
 
 /* ── Type hint values (flags byte bits 0-2) ──────────────── */
 
@@ -187,6 +191,14 @@ typedef struct {
     const AstProgram *prog;
 } CompilerDep;
 
+/* ── Source dependency ───────────────────────────────────── */
+
+typedef struct {
+    const char       *name;         /* source contract name */
+    const char       *config_json;  /* serialized config */
+    const char       *keyed_by;     /* key field name */
+} CompilerSource;
+
 /* ── Compiler struct ─────────────────────────────────────── */
 
 typedef struct {
@@ -240,6 +252,10 @@ typedef struct {
     /* Dependencies for inlining */
     CompilerDep      *deps;
     int               dep_count;
+
+    /* Source dependencies */
+    CompilerSource   *sources;
+    int               source_count;
 } Compiler;
 
 /* ── Packet result ───────────────────────────────────────── */
@@ -257,6 +273,11 @@ void compiler_init(Compiler *c, const AstProgram *prog, Arena *arena);
 /* Initialize with dependency data for inlining. */
 void compiler_init_with_deps(Compiler *c, const AstProgram *prog, Arena *arena,
                              CompilerDep *deps, int dep_count);
+
+/* Initialize with both deps and source data. */
+void compiler_init_with_sources(Compiler *c, const AstProgram *prog, Arena *arena,
+                                CompilerDep *deps, int dep_count,
+                                CompilerSource *sources, int source_count);
 
 /* Compile the program and produce a binary packet.
  * Returns a PacketResult with the packet data and size.

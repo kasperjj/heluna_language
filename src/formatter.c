@@ -42,7 +42,7 @@ static const char *binop_str(AstBinOp op) {
     case BIN_SUB: return "-";
     case BIN_MUL: return "*";
     case BIN_DIV: return "/";
-    case BIN_MOD: return "%";
+    case BIN_MOD: return "mod";
     case BIN_EQ:  return "=";
     case BIN_NEQ: return "!=";
     case BIN_LT:  return "<";
@@ -385,6 +385,17 @@ static void fmt_expr(const AstExpr *e, FILE *out, int depth) {
         indent(out, depth);
         fprintf(out, "end");
         break;
+
+    case EXPR_IS_TYPE:
+        fmt_expr(e->as.is_type.operand, out, depth);
+        fprintf(out, " is %s", e->as.is_type.type_name);
+        break;
+
+    case EXPR_OR_ELSE:
+        fmt_expr(e->as.or_else.primary, out, depth);
+        fprintf(out, " or else ");
+        fmt_expr(e->as.or_else.fallback, out, depth);
+        break;
     }
 }
 
@@ -421,6 +432,20 @@ static void fmt_contract(const AstContract *c, FILE *out) {
     if (c->kind == CONTRACT_SOURCE) {
         indent(out, 1);
         fprintf(out, "source %s\n\n", c->source_name);
+
+        if (c->config && c->config->kind == EXPR_RECORD && c->config->as.record.labels) {
+            indent(out, 1);
+            fprintf(out, "config\n");
+            for (const AstLabel *l = c->config->as.record.labels; l; l = l->next) {
+                indent(out, 2);
+                fprintf(out, "%s: ", l->name);
+                fmt_expr(l->value, out, 2);
+                if (l->next) fprintf(out, ",");
+                fprintf(out, "\n");
+            }
+            indent(out, 1);
+            fprintf(out, "end\n\n");
+        }
 
         indent(out, 1);
         fprintf(out, "keyed-by ");

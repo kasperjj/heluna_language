@@ -32,6 +32,7 @@ const char *token_kind_name(TokenKind kind) {
     case TOK_KEYED_BY:      return "KEYED_BY";
     case TOK_RETURNS:       return "RETURNS";
     case TOK_LOOKUP:        return "LOOKUP";
+    case TOK_CONFIG:        return "CONFIG";
     case TOK_AS:            return "AS";
     case TOK_STRING_TYPE:   return "STRING_TYPE";
     case TOK_INTEGER_TYPE:  return "INTEGER_TYPE";
@@ -57,8 +58,10 @@ const char *token_kind_name(TokenKind kind) {
     case TOK_OR:            return "OR";
     case TOK_NOT:           return "NOT";
     case TOK_IN:            return "IN";
+    case TOK_IS:            return "IS";
     case TOK_THROUGH:       return "THROUGH";
     case TOK_MAP:           return "MAP";
+    case TOK_MOD:           return "MOD";
     case TOK_DO:            return "DO";
     case TOK_FILTER:        return "FILTER";
     case TOK_WHERE:         return "WHERE";

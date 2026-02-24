@@ -186,6 +186,36 @@ static void check_contract(Checker *c) {
                 add_error(c, HELUNA_ERR_CONTRACT, ct->loc,
                           "source contract '%s' has no returns type", ct->name);
             }
+
+            /* Validate config block if present */
+            if (ct->config) {
+                if (ct->config->kind != EXPR_RECORD) {
+                    add_error(c, HELUNA_ERR_CONTRACT, ct->config->loc,
+                              "config block must be a record");
+                } else {
+                    /* Check for required 'type' label */
+                    int has_type = 0;
+                    for (const AstLabel *l = ct->config->as.record.labels;
+                         l; l = l->next) {
+                        if (strcmp(l->name, "type") == 0) has_type = 1;
+                        /* Verify all values are literals */
+                        if (l->value) {
+                            AstExprKind k = l->value->kind;
+                            if (k != EXPR_STRING && k != EXPR_INTEGER &&
+                                k != EXPR_FLOAT && k != EXPR_TRUE &&
+                                k != EXPR_FALSE) {
+                                add_error(c, HELUNA_ERR_CONTRACT, l->loc,
+                                          "config value '%s' must be a literal",
+                                          l->name);
+                            }
+                        }
+                    }
+                    if (!has_type) {
+                        add_error(c, HELUNA_ERR_CONTRACT, ct->config->loc,
+                                  "config block requires a 'type' field");
+                    }
+                }
+            }
         }
 
         /* Tag contracts: must have at least one tag */
@@ -634,6 +664,15 @@ static void check_expr(Checker *c, AstExpr *e) {
         }
         break;
     }
+
+    case EXPR_IS_TYPE:
+        check_expr(c, e->as.is_type.operand);
+        break;
+
+    case EXPR_OR_ELSE:
+        check_expr(c, e->as.or_else.primary);
+        check_expr(c, e->as.or_else.fallback);
+        break;
     }
 }
 

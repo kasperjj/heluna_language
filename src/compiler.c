@@ -325,6 +325,15 @@ static void track_stdlib(Compiler *c, uint16_t func_id) {
     c->stdlib_deps[c->stdlib_dep_count++] = func_id;
 }
 
+/* ── Source lookup ────────────────────────────────────────── */
+
+static int find_source(const Compiler *c, const char *name) {
+    for (int i = 0; i < c->source_count; i++) {
+        if (strcmp(c->sources[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
 /* ── Tag map ─────────────────────────────────────────────── */
 
 static int tag_bit_index(const Compiler *c, const char *name) {
@@ -1258,12 +1267,71 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
         break;
     }
 
-    case EXPR_LOOKUP: {
-        /* Phase 1: emit LOAD_NOTHING as placeholder */
-        emit(c, OP_LOAD_NOTHING, make_flags(THINT_NOTHING, TMODE_PROPAGATE),
-             dest, 0, 0);
+    case EXPR_IS_TYPE: {
+        CompileResult operand = compile_expr(c, e->as.is_type.operand, -1);
+        const char *tn = e->as.is_type.type_name;
+        uint8_t opcode;
+        if (strcmp(tn, "string") == 0)       opcode = OP_IS_STRING;
+        else if (strcmp(tn, "integer") == 0) opcode = OP_IS_INT;
+        else if (strcmp(tn, "float") == 0)   opcode = OP_IS_FLOAT;
+        else if (strcmp(tn, "boolean") == 0) opcode = OP_IS_BOOL;
+        else if (strcmp(tn, "nothing") == 0) opcode = OP_IS_NOTHING;
+        else if (strcmp(tn, "list") == 0)    opcode = OP_IS_LIST;
+        else if (strcmp(tn, "record") == 0)  opcode = OP_IS_RECORD;
+        else {
+            add_error(c, HELUNA_ERR_TYPE, e->loc,
+                      "unknown type in 'is' expression: %s", tn);
+            break;
+        }
+        emit(c, opcode, make_flags(THINT_BOOLEAN, TMODE_PROPAGATE),
+             dest, operand.slot, 0);
         r.slot = dest;
-        r.type = CTYPE_NOTHING;
+        r.type = CTYPE_BOOLEAN;
+        break;
+    }
+
+    case EXPR_OR_ELSE: {
+        CompileResult primary = compile_expr(c, e->as.or_else.primary, -1);
+        CompileResult fallback = compile_expr(c, e->as.or_else.fallback, -1);
+        emit(c, OP_COALESCE, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
+             dest, primary.slot, fallback.slot);
+        r.slot = dest;
+        r.type = fallback.type;
+        break;
+    }
+
+    case EXPR_LOOKUP: {
+        const char *sname = e->as.lookup.source_name;
+        int source_idx = find_source(c, sname);
+        if (source_idx < 0) {
+            /* No source data available — emit nothing */
+            emit(c, OP_LOAD_NOTHING, make_flags(THINT_NOTHING, TMODE_PROPAGATE),
+                 dest, 0, 0);
+            r.slot = dest;
+            r.type = CTYPE_NOTHING;
+            break;
+        }
+
+        /* Build keys record */
+        uint16_t rec = scratch_alloc(c);
+        emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+             rec, 0, 0);
+        for (AstLookupKey *lk = e->as.lookup.keys; lk; lk = lk->next) {
+            CompileResult val = compile_expr(c, lk->value, -1);
+            uint16_t key_ci = add_const_string(c, lk->name,
+                                               (int)strlen(lk->name));
+            uint16_t key_slot = scratch_alloc(c);
+            emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
+                 key_slot, key_ci, 0);
+            emit(c, OP_RECORD_SET, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
+                 rec, key_slot, val.slot);
+        }
+
+        emit(c, OP_SOURCE_LOOKUP,
+             make_flags(THINT_RECORD, TMODE_PROPAGATE),
+             dest, (uint16_t)source_idx, rec);
+        r.slot = dest;
+        r.type = CTYPE_RECORD;
         break;
     }
 
@@ -1774,6 +1842,27 @@ static void serialize_bytecode(PacketBuf *b, const Compiler *c) {
     }
 }
 
+/* ── Serialize SOURCES section ───────────────────────────── */
+
+static void serialize_sources(PacketBuf *b, const Compiler *c) {
+    buf_write_u16(b, (uint16_t)c->source_count);
+    for (int i = 0; i < c->source_count; i++) {
+        const CompilerSource *src = &c->sources[i];
+        /* name */
+        int nlen = (int)strlen(src->name);
+        buf_write_u16(b, (uint16_t)nlen);
+        buf_write_bytes(b, src->name, nlen);
+        /* config_json */
+        int clen = src->config_json ? (int)strlen(src->config_json) : 0;
+        buf_write_u16(b, (uint16_t)clen);
+        if (clen > 0) buf_write_bytes(b, src->config_json, clen);
+        /* keyed_by */
+        int klen = src->keyed_by ? (int)strlen(src->keyed_by) : 0;
+        buf_write_u16(b, (uint16_t)klen);
+        if (klen > 0) buf_write_bytes(b, src->keyed_by, klen);
+    }
+}
+
 /* ── Assemble final packet ───────────────────────────────── */
 
 static PacketResult assemble_packet(Compiler *c) {
@@ -1796,11 +1885,19 @@ static PacketResult assemble_packet(Compiler *c) {
     buf_init(&bytecode_buf, c->arena);
     serialize_bytecode(&bytecode_buf, c);
 
+    PacketBuf sources_buf;
+    buf_init(&sources_buf, c->arena);
+    int has_sources = c->source_count > 0;
+    if (has_sources) {
+        serialize_sources(&sources_buf, c);
+    }
+
     /* Calculate sizes */
-    int section_count = 4; /* CONTRACT, CONSTANTS, STDLIB_DEPS, BYTECODE */
+    int section_count = 4 + (has_sources ? 1 : 0);
     int dir_size = section_count * SECTION_DIR_ENTRY;
     int sections_size = contract_buf.len + constants_buf.len +
-                        stdlib_buf.len + bytecode_buf.len;
+                        stdlib_buf.len + bytecode_buf.len +
+                        sources_buf.len;
     int total_size = PACKET_HEADER_SIZE + dir_size + sections_size;
 
     /* Allocate final buffer */
@@ -1842,12 +1939,23 @@ static PacketResult assemble_packet(Compiler *c) {
     buf_write_u16(&pkt, SEC_BYTECODE);
     buf_write_u32(&pkt, (uint32_t)offset);
     buf_write_u32(&pkt, (uint32_t)bytecode_buf.len);
+    offset += bytecode_buf.len;
+
+    /* SOURCES (optional) */
+    if (has_sources) {
+        buf_write_u16(&pkt, SEC_SOURCES);
+        buf_write_u32(&pkt, (uint32_t)offset);
+        buf_write_u32(&pkt, (uint32_t)sources_buf.len);
+    }
 
     /* ── Section data ── */
     buf_write_bytes(&pkt, contract_buf.data, contract_buf.len);
     buf_write_bytes(&pkt, constants_buf.data, constants_buf.len);
     buf_write_bytes(&pkt, stdlib_buf.data, stdlib_buf.len);
     buf_write_bytes(&pkt, bytecode_buf.data, bytecode_buf.len);
+    if (has_sources) {
+        buf_write_bytes(&pkt, sources_buf.data, sources_buf.len);
+    }
 
     result.data = pkt.data;
     result.size = (size_t)pkt.len;
@@ -1868,6 +1976,14 @@ void compiler_init_with_deps(Compiler *c, const AstProgram *prog, Arena *arena,
     compiler_init(c, prog, arena);
     c->deps = deps;
     c->dep_count = dep_count;
+}
+
+void compiler_init_with_sources(Compiler *c, const AstProgram *prog, Arena *arena,
+                                CompilerDep *deps, int dep_count,
+                                CompilerSource *sources, int source_count) {
+    compiler_init_with_deps(c, prog, arena, deps, dep_count);
+    c->sources = sources;
+    c->source_count = source_count;
 }
 
 PacketResult compiler_compile(Compiler *c) {

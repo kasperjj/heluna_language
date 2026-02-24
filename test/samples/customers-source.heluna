@@ -10,6 +10,12 @@ contract customers-source
 
   source "customers"
 
+  config
+    type: "file",
+    path: "test/data/customers.json",
+    collection: "customers"
+  end
+
   keyed-by customer-id as string
 
   returns record

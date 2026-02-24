@@ -39,6 +39,7 @@ typedef enum {
     TOK_KEYED_BY,
     TOK_RETURNS,
     TOK_LOOKUP,
+    TOK_CONFIG,
 
     /* Keywords — types */
     TOK_AS,
@@ -68,8 +69,10 @@ typedef enum {
     TOK_OR,
     TOK_NOT,
     TOK_IN,
+    TOK_IS,
     TOK_THROUGH,
     TOK_MAP,
+    TOK_MOD,
     TOK_DO,
     TOK_FILTER,
     TOK_WHERE,

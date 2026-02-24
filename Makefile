@@ -15,6 +15,12 @@ else
   CFLAGS += -O2
 endif
 
+# Optional curl support for HTTP sources
+ifdef CURL
+  CFLAGS  += -DHELUNA_CURL
+  LDFLAGS += -lcurl
+endif
+
 # Gather sources
 LIB_SRC    = $(wildcard src/*.c)
 LIB_OBJ    = $(LIB_SRC:src/%.c=build/obj/%.o)

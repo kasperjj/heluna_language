@@ -81,9 +81,10 @@ static int is_name_token(TokenKind k) {
     case TOK_RESULT: case TOK_IF: case TOK_THEN: case TOK_ELSE:
     case TOK_END: case TOK_MATCH: case TOK_WHEN: case TOK_BETWEEN:
     case TOK_AND: case TOK_OR: case TOK_NOT: case TOK_IN:
+    case TOK_IS: case TOK_MOD:
     case TOK_THROUGH: case TOK_MAP: case TOK_DO: case TOK_FILTER:
     case TOK_WHERE: case TOK_SOURCE: case TOK_SOURCES: case TOK_KEYED_BY:
-    case TOK_RETURNS: case TOK_LOOKUP:
+    case TOK_RETURNS: case TOK_LOOKUP: case TOK_CONFIG:
         return 1;
     default:
         return 0;
@@ -167,11 +168,13 @@ static AstExpr *parse_accessors(Parser *p, AstExpr *base) {
                 k == TOK_OF || k == TOK_WHEN || k == TOK_THEN ||
                 k == TOK_ELSE || k == TOK_IF || k == TOK_AND ||
                 k == TOK_OR || k == TOK_NOT || k == TOK_IN ||
+                k == TOK_IS || k == TOK_MOD ||
                 k == TOK_WHERE || k == TOK_THROUGH || k == TOK_BETWEEN ||
                 k == TOK_FORBID || k == TOK_REQUIRE || k == TOK_REJECT ||
                 k == TOK_TAGGED || k == TOK_SANITIZERS || k == TOK_STRIPS ||
                 k == TOK_CONTRACT || k == TOK_SOURCE || k == TOK_SOURCES ||
-                k == TOK_KEYED_BY || k == TOK_RETURNS || k == TOK_LOOKUP) {
+                k == TOK_KEYED_BY || k == TOK_RETURNS || k == TOK_LOOKUP ||
+                k == TOK_CONFIG) {
                 advance(p);
                 const char *field = token_text(p, p->current);
                 AstExpr *acc = new_expr(p, EXPR_ACCESS, loc);
@@ -238,6 +241,44 @@ static AstExpr *parse_record_literal(Parser *p) {
     } while (match(p, TOK_COMMA));
 
     expect(p, TOK_RBRACE);
+    rec->as.record.labels = head;
+    return rec;
+}
+
+/* Parse a config block delimited by config...end (no braces) */
+static AstExpr *parse_config_block(Parser *p) {
+    SrcLoc loc = p->current.loc; /* on 'config' */
+    AstExpr *rec = new_expr(p, EXPR_RECORD, loc);
+    rec->as.record.labels = NULL;
+
+    if (peek(p) == TOK_END) {
+        advance(p);
+        return rec;
+    }
+
+    AstLabel *head = NULL;
+    AstLabel **tail = &head;
+
+    do {
+        expect_name(p);
+        if (p->had_error) return rec;
+        SrcLoc label_loc = p->current.loc;
+        const char *name = ident_name(p);
+
+        expect(p, TOK_COLON);
+        if (p->had_error) return rec;
+
+        AstExpr *value = parse_expression(p);
+
+        AstLabel *label = arena_calloc(p->arena, sizeof(AstLabel));
+        label->name = name;
+        label->value = value;
+        label->loc = label_loc;
+        *tail = label;
+        tail = &label->next;
+    } while (match(p, TOK_COMMA));
+
+    expect(p, TOK_END);
     rec->as.record.labels = head;
     return rec;
 }
@@ -393,10 +434,10 @@ static AstExpr *parse_unary(Parser *p) {
 static AstExpr *parse_term(Parser *p) {
     AstExpr *left = parse_unary(p);
 
-    while (peek(p) == TOK_STAR || peek(p) == TOK_SLASH || peek(p) == TOK_PERCENT) {
+    while (peek(p) == TOK_STAR || peek(p) == TOK_SLASH || peek(p) == TOK_PERCENT || peek(p) == TOK_MOD) {
         SrcLoc loc = p->next.loc;
         AstBinOp op;
-        if (peek(p) == TOK_STAR)    op = BIN_MUL;
+        if (peek(p) == TOK_STAR)         op = BIN_MUL;
         else if (peek(p) == TOK_SLASH)   op = BIN_DIV;
         else                              op = BIN_MOD;
         advance(p);
@@ -437,6 +478,33 @@ static AstExpr *parse_compare_expr(Parser *p) {
     AstExpr *left = parse_arith_expr(p);
 
     TokenKind k = peek(p);
+
+    /* 'is' type check: <expr> is <type-keyword> */
+    if (k == TOK_IS) {
+        SrcLoc loc = p->next.loc;
+        advance(p); /* consume 'is' */
+        TokenKind tk = peek(p);
+        const char *type_name;
+        switch (tk) {
+        case TOK_STRING_TYPE:   type_name = "string";  break;
+        case TOK_INTEGER_TYPE:  type_name = "integer"; break;
+        case TOK_FLOAT_TYPE:    type_name = "float";   break;
+        case TOK_BOOLEAN_TYPE:  type_name = "boolean"; break;
+        case TOK_NOTHING:       type_name = "nothing"; break;
+        case TOK_LIST:          type_name = "list";    break;
+        case TOK_RECORD:        type_name = "record";  break;
+        default:
+            error(p, p->next.loc, "expected type keyword after 'is', got %s",
+                  token_kind_name(tk));
+            return left;
+        }
+        advance(p); /* consume type keyword */
+        AstExpr *e = new_expr(p, EXPR_IS_TYPE, loc);
+        e->as.is_type.operand = left;
+        e->as.is_type.type_name = type_name;
+        return e;
+    }
+
     if (k == TOK_EQ || k == TOK_NEQ || k == TOK_LT || k == TOK_GT ||
         k == TOK_LTE || k == TOK_GTE) {
         SrcLoc loc = p->next.loc;
@@ -496,13 +564,24 @@ static AstExpr *parse_or_expr(Parser *p) {
 
     while (peek(p) == TOK_OR) {
         SrcLoc loc = p->next.loc;
-        advance(p);
-        AstExpr *right = parse_and_expr(p);
-        AstExpr *bin = new_expr(p, EXPR_BINARY, loc);
-        bin->as.binary.op = BIN_OR;
-        bin->as.binary.left = left;
-        bin->as.binary.right = right;
-        left = bin;
+        advance(p); /* consume 'or' */
+
+        /* 'or else' → coalesce expression */
+        if (peek(p) == TOK_ELSE) {
+            advance(p); /* consume 'else' */
+            AstExpr *fallback = parse_and_expr(p);
+            AstExpr *oe = new_expr(p, EXPR_OR_ELSE, loc);
+            oe->as.or_else.primary = left;
+            oe->as.or_else.fallback = fallback;
+            left = oe;
+        } else {
+            AstExpr *right = parse_and_expr(p);
+            AstExpr *bin = new_expr(p, EXPR_BINARY, loc);
+            bin->as.binary.op = BIN_OR;
+            bin->as.binary.left = left;
+            bin->as.binary.right = right;
+            left = bin;
+        }
     }
     return left;
 }
@@ -1245,6 +1324,12 @@ static AstContract *parse_contract(Parser *p) {
         if (p->had_error) return contract;
         contract->source_name = arena_strndup(p->arena, p->current.start,
                                                (size_t)p->current.length);
+
+        /* Optional: config block */
+        if (peek(p) == TOK_CONFIG) {
+            advance(p); /* consume 'config' */
+            contract->config = parse_config_block(p);
+        }
 
         expect(p, TOK_KEYED_BY);
         if (p->had_error) return contract;

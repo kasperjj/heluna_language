@@ -141,6 +141,107 @@ static int resolve_deps(Arena *arena, const AstProgram *prog,
     return 0;
 }
 
+/* ── Source resolution ─────────────────────────────────────── */
+
+/* Serialize an AST config (EXPR_RECORD with literal values) to JSON string */
+static const char *config_to_json(Arena *arena, const AstExpr *config) {
+    if (!config || config->kind != EXPR_RECORD) return NULL;
+
+    /* Build JSON string manually from literals */
+    char buf[2048];
+    int pos = 0;
+    buf[pos++] = '{';
+
+    for (const AstLabel *l = config->as.record.labels; l; l = l->next) {
+        if (pos > 1) buf[pos++] = ',';
+        pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos,
+                        "\"%s\":", l->name);
+        if (l->value) {
+            switch (l->value->kind) {
+            case EXPR_STRING:
+                /* Already includes quotes */
+                pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos,
+                                "%.*s", l->value->as.string_val.length,
+                                l->value->as.string_val.value);
+                break;
+            case EXPR_INTEGER:
+                pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos,
+                                "%lld", l->value->as.integer_val);
+                break;
+            case EXPR_FLOAT:
+                pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos,
+                                "%g", l->value->as.float_val);
+                break;
+            case EXPR_TRUE:
+                pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "true");
+                break;
+            case EXPR_FALSE:
+                pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "false");
+                break;
+            default:
+                pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "null");
+                break;
+            }
+        }
+    }
+    buf[pos++] = '}';
+    buf[pos] = '\0';
+    return arena_strndup(arena, buf, (size_t)pos);
+}
+
+static int resolve_sources(Arena *arena, const AstProgram *prog,
+                           CompilerSource *sources, int *source_count,
+                           int max_sources) {
+    const AstContract *ct = prog->contract;
+    if (!ct->sources_refs) return 0;
+
+    for (int si = 0; si < ct->sources_count; si++) {
+        const char *sname = ct->sources_refs[si];
+        /* Skip if already resolved */
+        int found = 0;
+        for (int i = 0; i < *source_count; i++) {
+            if (strcmp(sources[i].name, sname) == 0) { found = 1; break; }
+        }
+        if (found || *source_count >= max_sources) continue;
+
+        /* Parse the source contract file */
+        char dep_path[256];
+        snprintf(dep_path, sizeof dep_path, "test/samples/%s.heluna", sname);
+        char *src = read_file(dep_path);
+        if (!src) continue;
+        dep_sources[dep_source_count++] = src;
+
+        Lexer lex;
+        lexer_init(&lex, src, dep_path, arena);
+        Parser parser;
+        parser_init(&parser, &lex, arena);
+        AstProgram *dep_prog = parser_parse(&parser);
+        if (parser.had_error) continue;
+
+        Checker checker;
+        checker_init(&checker, dep_prog, arena);
+        if (checker_check(&checker) > 0) continue;
+
+        if (dep_prog->contract->kind != CONTRACT_SOURCE) continue;
+
+        /* Extract config JSON */
+        const char *config_json = config_to_json(arena, dep_prog->contract->config);
+
+        /* Extract keyed-by field name */
+        const char *keyed_by = NULL;
+        if (dep_prog->contract->keyed_by) {
+            keyed_by = dep_prog->contract->keyed_by->name;
+        }
+
+        sources[*source_count].name = sname;
+        sources[*source_count].config_json = config_json;
+        sources[*source_count].keyed_by = keyed_by;
+        (*source_count)++;
+    }
+
+    return 0;
+}
+
 /* Convert an AST literal expression to an HVal for test case data */
 static HVal *ast_literal_to_hval(Arena *arena, const AstExpr *e);
 
@@ -389,9 +490,17 @@ static void test_sample(const char *name) {
     dep_source_count = 0;
     resolve_deps(arena, prog, deps, &dep_count, 32);
 
+    /* Resolve source dependencies */
+    CompilerSource sources[16];
+    int source_count = 0;
+    resolve_sources(arena, prog, sources, &source_count, 16);
+
     /* Compile */
     Compiler compiler;
-    if (dep_count > 0) {
+    if (source_count > 0) {
+        compiler_init_with_sources(&compiler, prog, arena,
+                                   deps, dep_count, sources, source_count);
+    } else if (dep_count > 0) {
         compiler_init_with_deps(&compiler, prog, arena, deps, dep_count);
     } else {
         compiler_init(&compiler, prog, arena);

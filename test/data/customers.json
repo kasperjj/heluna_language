@@ -1,0 +1,6 @@
+{
+  "customers": [
+    { "customer-id": "C001", "name": "Alice Smith", "credit-limit": 100.0 },
+    { "customer-id": "C002", "name": "Bob Jones", "credit-limit": 25.0 }
+  ]
+}

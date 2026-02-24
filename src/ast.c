@@ -22,7 +22,7 @@ static const char *binop_name(AstBinOp op) {
     case BIN_SUB: return "-";
     case BIN_MUL: return "*";
     case BIN_DIV: return "/";
-    case BIN_MOD: return "%";
+    case BIN_MOD: return "mod";
     case BIN_EQ:  return "=";
     case BIN_NEQ: return "!=";
     case BIN_LT:  return "<";
@@ -212,6 +212,18 @@ static void print_expr(const AstExpr *e, FILE *out, int depth) {
         }
         fprintf(out, ")");
         break;
+    case EXPR_IS_TYPE:
+        fprintf(out, "(is ");
+        print_expr(e->as.is_type.operand, out, depth);
+        fprintf(out, " %s)", e->as.is_type.type_name);
+        break;
+    case EXPR_OR_ELSE:
+        fprintf(out, "(or-else ");
+        print_expr(e->as.or_else.primary, out, depth);
+        fprintf(out, " ");
+        print_expr(e->as.or_else.fallback, out, depth);
+        fprintf(out, ")");
+        break;
     }
 }
 
@@ -362,6 +374,12 @@ void ast_print(const AstProgram *prog, FILE *out) {
             if (c->source_name) {
                 indent(out, 2);
                 fprintf(out, "(source %s)\n", c->source_name);
+            }
+            if (c->config) {
+                indent(out, 2);
+                fprintf(out, "(config ");
+                print_expr(c->config, out, 2);
+                fprintf(out, ")\n");
             }
             if (c->keyed_by) {
                 indent(out, 2);

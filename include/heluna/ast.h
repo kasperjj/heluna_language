@@ -35,6 +35,8 @@ typedef enum {
     EXPR_ACCESS,
     EXPR_PAREN,
     EXPR_LOOKUP,
+    EXPR_IS_TYPE,
+    EXPR_OR_ELSE,
 } AstExprKind;
 
 typedef enum {
@@ -152,6 +154,12 @@ struct AstExpr {
             const char   *source_name;
             AstLookupKey *keys;
         } lookup;
+
+        /* EXPR_IS_TYPE */
+        struct { AstExpr *operand; const char *type_name; } is_type;
+
+        /* EXPR_OR_ELSE */
+        struct { AstExpr *primary; AstExpr *fallback; } or_else;
     } as;
 };
 
@@ -342,6 +350,7 @@ typedef struct AstContract {
 
     /* Source contract fields */
     const char       *source_name;   /* the collection name string */
+    AstExpr          *config;        /* EXPR_RECORD or NULL */
     AstFieldDecl     *keyed_by;      /* key field declarations */
     AstType          *returns_type;  /* return type */
 

@@ -73,6 +73,14 @@ typedef struct {
     HVal    *value;
 } VmConstant;
 
+/* ── Source metadata (parsed from binary packet) ─────────── */
+
+typedef struct {
+    const char *name;         /* source contract name */
+    const char *config_json;  /* raw JSON config string */
+    const char *keyed_by;     /* key field name */
+} VmSource;
+
 /* ── Parsed binary packet ────────────────────────────────── */
 
 typedef struct {
@@ -107,6 +115,10 @@ typedef struct {
     /* Bytecode */
     Instruction  *instructions;
     int           instr_count;
+
+    /* Sources */
+    VmSource     *sources;
+    int           source_count;
 } VmPacket;
 
 /* ── VM runtime state ────────────────────────────────────── */
@@ -117,6 +129,7 @@ typedef struct {
     Arena       *arena;
     HelunaError  error;
     int          had_error;
+    HVal       **source_cache;  /* cached loaded source data, one per source */
 } Vm;
 
 /* ── Public API ──────────────────────────────────────────── */
@@ -136,5 +149,9 @@ HVal *vm_execute(Vm *vm, HVal *input);
  * Defined in vm_stdlib.c. */
 HVal *vm_stdlib_call(uint16_t func_id, HVal *args,
                      Arena *arena, HelunaError *err);
+
+/* Source lookup dispatch. Called by the VM for OP_SOURCE_LOOKUP.
+ * Defined in vm_source.c. */
+HVal *vm_source_resolve(Vm *vm, int source_idx, HVal *keys);
 
 #endif /* HELUNA_VM_H */
