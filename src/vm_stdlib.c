@@ -1634,12 +1634,30 @@ static const VmStdlibEntry vm_stdlib_table[] = {
     { 0, NULL },
 };
 
+/* ── Direct dispatch table (O(1) lookup by func_id) ──────── */
+
+#define STDLIB_DISPATCH_SIZE 244  /* max func_id 0x00F3 = 243, +1 */
+
+static VmStdlibFn stdlib_dispatch[STDLIB_DISPATCH_SIZE];
+static int stdlib_dispatch_init = 0;
+
+static void stdlib_init_dispatch(void) {
+    if (stdlib_dispatch_init) return;
+    memset(stdlib_dispatch, 0, sizeof(stdlib_dispatch));
+    for (const VmStdlibEntry *e = vm_stdlib_table; e->fn; e++) {
+        if (e->func_id < STDLIB_DISPATCH_SIZE) {
+            stdlib_dispatch[e->func_id] = e->fn;
+        }
+    }
+    stdlib_dispatch_init = 1;
+}
+
 HVal *vm_stdlib_call(uint16_t func_id, HVal *args,
                      Arena *arena, HelunaError *err) {
-    for (const VmStdlibEntry *e = vm_stdlib_table; e->fn; e++) {
-        if (e->func_id == func_id) {
-            return e->fn(arena, args, err);
-        }
+    if (!stdlib_dispatch_init) stdlib_init_dispatch();
+
+    if (func_id < STDLIB_DISPATCH_SIZE && stdlib_dispatch[func_id]) {
+        return stdlib_dispatch[func_id](arena, args, err);
     }
 
     heluna_error_set(err, HELUNA_ERR_RUNTIME, (SrcLoc){0},

@@ -16,6 +16,13 @@ typedef struct {
     uint64_t tags;     /* tag bitfield per slot */
 } VmSlot;
 
+/* Tail pointer for O(1) list/record append.  Kept in a separate parallel
+ * array so that VmSlot stays at 16 bytes for cache-friendly access. */
+typedef union {
+    HVal   *list_tail;
+    HField *record_tail;
+} VmSlotTail;
+
 /* ── Contract metadata (parsed from binary packet) ───────── */
 
 typedef struct {
@@ -121,6 +128,25 @@ typedef struct {
     int           source_count;
 } VmPacket;
 
+/* ── Iteration frame (for main-loop iteration) ──────────── */
+
+#define VM_MAX_ITER_DEPTH 8
+
+typedef struct {
+    int       mode;          /* ITER_MAP, ITER_FILTER, ITER_FOLD */
+    HVal     *next_elem;     /* next element to process (NULL = done) */
+    uint16_t  elem_slot;     /* scratchpad slot for current element */
+    uint16_t  source_slot;   /* source list slot (for tag propagation) */
+    int       body_start;    /* PC of first body instruction */
+    int       collect_pc;    /* PC of OP_ITER_COLLECT */
+    uint16_t  result_dest;   /* destination slot from ITER_COLLECT */
+    uint16_t  slot_a;        /* operand1 from ITER_COLLECT */
+    uint16_t  slot_b;        /* operand2 from ITER_COLLECT */
+    HVal     *result_head;   /* result list head (map/filter) */
+    HVal    **result_tail;   /* tail pointer for O(1) append */
+    HVal     *acc;           /* accumulator (fold) */
+} VmIterFrame;
+
 /* ── VM runtime state ────────────────────────────────────── */
 
 typedef struct {
@@ -130,6 +156,18 @@ typedef struct {
     HelunaError  error;
     int          had_error;
     HVal       **source_cache;  /* cached loaded source data, one per source */
+
+    /* Singleton values (interned, never mutated) */
+    HVal        *val_true;
+    HVal        *val_false;
+    HVal        *val_nothing;
+
+    /* Tail pointers (parallel to scratchpad, allocated on demand) */
+    VmSlotTail  *slot_tails;
+
+    /* Iteration state (allocated from arena on first use) */
+    VmIterFrame *iter_stack;
+    int          iter_depth;
 } Vm;
 
 /* ── Public API ──────────────────────────────────────────── */

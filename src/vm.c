@@ -592,6 +592,14 @@ static void propagate_tags(Vm *vm, uint16_t dest,
     }
 }
 
+/* Ensure slot_tails array is allocated (lazy init) */
+static inline void ensure_slot_tails(Vm *vm, int sp_size) {
+    if (!vm->slot_tails) {
+        vm->slot_tails = arena_calloc(vm->arena,
+            (size_t)sp_size * sizeof(VmSlotTail));
+    }
+}
+
 /* Convert HVal to string representation (for STR_CONCAT auto-convert) */
 static const char *val_to_str(Arena *arena, HVal *v) {
     if (!v) return "nothing";
@@ -637,6 +645,14 @@ HVal *vm_execute(Vm *vm, HVal *input) {
     if (sp_size < 1) sp_size = 1;
 
     vm->scratchpad = arena_calloc(arena, (size_t)sp_size * sizeof(VmSlot));
+    vm->slot_tails  = NULL;  /* allocated lazily on first list/record construction */
+
+    /* Intern singleton values */
+    vm->val_true    = make_boolean(arena, 1);
+    vm->val_false   = make_boolean(arena, 0);
+    vm->val_nothing = make_nothing(arena);
+    vm->iter_stack  = NULL;
+    vm->iter_depth  = 0;
 
     /* Map input fields to input slots */
     if (input && input->kind == VAL_RECORD) {
@@ -645,7 +661,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             if (f) {
                 vm->scratchpad[i].value = f->value;
             } else {
-                vm->scratchpad[i].value = make_nothing(arena);
+                vm->scratchpad[i].value = vm->val_nothing;
             }
             vm->scratchpad[i].tags = pkt->input_fields[i].tag_bits;
         }
@@ -657,12 +673,13 @@ HVal *vm_execute(Vm *vm, HVal *input) {
     int pc = 0;
     uint16_t result_slot = 0;
 
-    while (pc < ic && !vm->had_error) {
+    while (pc < ic) {
         const Instruction *ins = &instrs[pc];
         uint16_t d  = ins->dest;
         uint16_t o1 = ins->operand1;
         uint16_t o2 = ins->operand2;
 
+#ifdef HELUNA_DEBUG
         /* Bounds check dest slot (except for jumps) */
         if (ins->opcode != OP_JUMP && ins->opcode != OP_JUMP_IF &&
             ins->opcode != OP_JUMP_IF_NOT && d >= sp_size) {
@@ -670,6 +687,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                      d, sp_size);
             return NULL;
         }
+#endif
 
         switch (ins->opcode) {
 
@@ -692,7 +710,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             break;
 
         case OP_LOAD_NOTHING:
-            vm->scratchpad[d].value = make_nothing(arena);
+            vm->scratchpad[d].value = vm->val_nothing;
             vm->scratchpad[d].tags  = 0;
             result_slot = d;
             break;
@@ -854,7 +872,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
         case OP_EQ: {
             HVal *a = vm->scratchpad[o1].value;
             HVal *b = vm->scratchpad[o2].value;
-            vm->scratchpad[d].value = make_boolean(arena, hval_equal(a, b));
+            vm->scratchpad[d].value = hval_equal(a, b) ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -863,7 +881,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
         case OP_NEQ: {
             HVal *a = vm->scratchpad[o1].value;
             HVal *b = vm->scratchpad[o2].value;
-            vm->scratchpad[d].value = make_boolean(arena, !hval_equal(a, b));
+            vm->scratchpad[d].value = !hval_equal(a, b) ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -876,11 +894,11 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
             if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
                 (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    to_double(a) < to_double(b));
+                vm->scratchpad[d].value = to_double(a) < to_double(b)
+                    ? vm->val_true : vm->val_false;
             } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    strcmp(a->as.string_val, b->as.string_val) < 0);
+                vm->scratchpad[d].value = strcmp(a->as.string_val, b->as.string_val) < 0
+                    ? vm->val_true : vm->val_false;
             } else {
                 vm_error(vm, "LT: incompatible types");
                 return NULL;
@@ -897,11 +915,11 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
             if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
                 (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    to_double(a) > to_double(b));
+                vm->scratchpad[d].value = to_double(a) > to_double(b)
+                    ? vm->val_true : vm->val_false;
             } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    strcmp(a->as.string_val, b->as.string_val) > 0);
+                vm->scratchpad[d].value = strcmp(a->as.string_val, b->as.string_val) > 0
+                    ? vm->val_true : vm->val_false;
             } else {
                 vm_error(vm, "GT: incompatible types");
                 return NULL;
@@ -918,11 +936,11 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
             if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
                 (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    to_double(a) <= to_double(b));
+                vm->scratchpad[d].value = to_double(a) <= to_double(b)
+                    ? vm->val_true : vm->val_false;
             } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    strcmp(a->as.string_val, b->as.string_val) <= 0);
+                vm->scratchpad[d].value = strcmp(a->as.string_val, b->as.string_val) <= 0
+                    ? vm->val_true : vm->val_false;
             } else {
                 vm_error(vm, "LTE: incompatible types");
                 return NULL;
@@ -939,11 +957,11 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
             if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
                 (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    to_double(a) >= to_double(b));
+                vm->scratchpad[d].value = to_double(a) >= to_double(b)
+                    ? vm->val_true : vm->val_false;
             } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
-                vm->scratchpad[d].value = make_boolean(arena,
-                    strcmp(a->as.string_val, b->as.string_val) >= 0);
+                vm->scratchpad[d].value = strcmp(a->as.string_val, b->as.string_val) >= 0
+                    ? vm->val_true : vm->val_false;
             } else {
                 vm_error(vm, "GTE: incompatible types");
                 return NULL;
@@ -962,8 +980,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 vm_error(vm, "AND: non-boolean operands");
                 return NULL;
             }
-            vm->scratchpad[d].value = make_boolean(arena,
-                a->as.boolean_val && b->as.boolean_val);
+            vm->scratchpad[d].value = (a->as.boolean_val && b->as.boolean_val)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -976,8 +994,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 vm_error(vm, "OR: non-boolean operands");
                 return NULL;
             }
-            vm->scratchpad[d].value = make_boolean(arena,
-                a->as.boolean_val || b->as.boolean_val);
+            vm->scratchpad[d].value = (a->as.boolean_val || b->as.boolean_val)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -989,7 +1007,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 vm_error(vm, "NOT: non-boolean operand");
                 return NULL;
             }
-            vm->scratchpad[d].value = make_boolean(arena, !a->as.boolean_val);
+            vm->scratchpad[d].value = !a->as.boolean_val
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1021,8 +1040,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_STRING: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                a && a->kind == VAL_STRING);
+            vm->scratchpad[d].value = (a && a->kind == VAL_STRING)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1030,8 +1049,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_INT: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                a && a->kind == VAL_INTEGER);
+            vm->scratchpad[d].value = (a && a->kind == VAL_INTEGER)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1039,8 +1058,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_FLOAT: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                a && a->kind == VAL_FLOAT);
+            vm->scratchpad[d].value = (a && a->kind == VAL_FLOAT)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1048,8 +1067,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_BOOL: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                a && a->kind == VAL_BOOLEAN);
+            vm->scratchpad[d].value = (a && a->kind == VAL_BOOLEAN)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1057,8 +1076,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_NOTHING: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                !a || a->kind == VAL_NOTHING);
+            vm->scratchpad[d].value = (!a || a->kind == VAL_NOTHING)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1066,8 +1085,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_LIST: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                a && a->kind == VAL_LIST);
+            vm->scratchpad[d].value = (a && a->kind == VAL_LIST)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1075,8 +1094,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
         case OP_IS_RECORD: {
             HVal *a = vm->scratchpad[o1].value;
-            vm->scratchpad[d].value = make_boolean(arena,
-                a && a->kind == VAL_RECORD);
+            vm->scratchpad[d].value = (a && a->kind == VAL_RECORD)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1140,7 +1159,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 default: b = 1; break;
                 }
             }
-            vm->scratchpad[d].value = make_boolean(arena, b);
+            vm->scratchpad[d].value = b ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1151,6 +1170,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
         case OP_RECORD_NEW:
             vm->scratchpad[d].value = make_record(arena, NULL);
             vm->scratchpad[d].tags = 0;
+            ensure_slot_tails(vm, sp_size);
+            vm->slot_tails[d].record_tail = NULL;
             result_slot = d;
             break;
 
@@ -1184,14 +1205,19 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 HField *nf = arena_calloc(arena, sizeof(HField));
                 nf->name  = key;
                 nf->value = val;
-                /* Append to end to preserve insertion order */
-                if (!rec->as.record_fields) {
+                /* Append via tail pointer for O(1) */
+                ensure_slot_tails(vm, sp_size);
+                if (vm->slot_tails[d].record_tail) {
+                    vm->slot_tails[d].record_tail->next = nf;
+                } else if (!rec->as.record_fields) {
                     rec->as.record_fields = nf;
                 } else {
+                    /* Loaded from elsewhere — traverse once to find tail */
                     HField *last = rec->as.record_fields;
                     while (last->next) last = last->next;
                     last->next = nf;
                 }
+                vm->slot_tails[d].record_tail = nf;
             }
 
             /* Propagate tags from value to record */
@@ -1206,7 +1232,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
 
             if (!rec || rec->kind != VAL_RECORD || !key_val ||
                 key_val->kind != VAL_STRING) {
-                vm->scratchpad[d].value = make_nothing(arena);
+                vm->scratchpad[d].value = vm->val_nothing;
                 vm->scratchpad[d].tags = 0;
             } else {
                 HField *f = record_get_field(rec, key_val->as.string_val);
@@ -1214,7 +1240,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                     vm->scratchpad[d].value = f->value;
                     vm->scratchpad[d].tags = vm->scratchpad[o1].tags;
                 } else {
-                    vm->scratchpad[d].value = make_nothing(arena);
+                    vm->scratchpad[d].value = vm->val_nothing;
                     vm->scratchpad[d].tags = 0;
                 }
             }
@@ -1231,7 +1257,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 key_val->kind == VAL_STRING) {
                 has = record_get_field(rec, key_val->as.string_val) != NULL;
             }
-            vm->scratchpad[d].value = make_boolean(arena, has);
+            vm->scratchpad[d].value = has ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1242,6 +1268,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
         case OP_LIST_NEW:
             vm->scratchpad[d].value = make_list(arena, NULL);
             vm->scratchpad[d].tags = 0;
+            ensure_slot_tails(vm, sp_size);
+            vm->slot_tails[d].list_tail = NULL;
             result_slot = d;
             break;
 
@@ -1263,13 +1291,19 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             }
             item->next = NULL;
 
-            if (!list->as.list_head) {
+            /* Append via tail pointer for O(1) */
+            ensure_slot_tails(vm, sp_size);
+            if (vm->slot_tails[d].list_tail) {
+                vm->slot_tails[d].list_tail->next = item;
+            } else if (!list->as.list_head) {
                 list->as.list_head = item;
             } else {
+                /* Loaded from elsewhere — traverse once to find tail */
                 HVal *last = list->as.list_head;
                 while (last->next) last = last->next;
                 last->next = item;
             }
+            vm->slot_tails[d].list_tail = item;
 
             vm->scratchpad[d].tags |= vm->scratchpad[o1].tags;
             result_slot = d;
@@ -1293,7 +1327,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             if (!elem) {
                 /* Out-of-bounds access returns nothing (matches Heluna's
                    maybe/nothing philosophy; needed for list pattern matching) */
-                vm->scratchpad[d].value = make_nothing(arena);
+                vm->scratchpad[d].value = vm->val_nothing;
                 vm->scratchpad[d].tags = 0;
                 result_slot = d;
                 break;
@@ -1373,453 +1407,128 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             int body_start = pc + 1;
 
             /* Find ITER_COLLECT after body */
-            int collect_pc = body_start + body_length;
-            if (collect_pc >= ic ||
-                instrs[collect_pc].opcode != OP_ITER_COLLECT) {
+            int collect_pc_val = body_start + body_length;
+            if (collect_pc_val >= ic ||
+                instrs[collect_pc_val].opcode != OP_ITER_COLLECT) {
                 vm_error(vm, "ITER_SETUP: missing ITER_COLLECT");
                 return NULL;
             }
 
-            const Instruction *collect = &instrs[collect_pc];
-            uint16_t result_dest = collect->dest;
-            uint16_t slot_a = collect->operand1;
-            uint16_t slot_b = collect->operand2;
+            const Instruction *collect = &instrs[collect_pc_val];
 
-            /* Build result based on mode */
-            HVal *result_head = NULL;
-            HVal **result_tail = &result_head;
-            HVal *acc = NULL;
-
-            if (mode == ITER_FOLD) {
-                /* Accumulator is already in slot_a from prior instructions */
-                acc = vm->scratchpad[slot_a].value;
-            }
-
-            /* Iterate over source list */
-            for (HVal *elem = source->as.list_head; elem; elem = elem->next) {
-                /* Place element in element_slot */
-                vm->scratchpad[elem_slot].value = elem;
-                vm->scratchpad[elem_slot].tags  = vm->scratchpad[source_slot].tags;
-
-                /* Execute body instructions */
-                for (int bpc = body_start; bpc < body_start + body_length; bpc++) {
-                    const Instruction *bi = &instrs[bpc];
-                    /* Save/restore pc temporarily */
-                    int save_pc = pc;
-                    pc = bpc;
-
-                    /* Re-dispatch this instruction via recursive-like approach:
-                     * We'll inline a mini-dispatch for the body.
-                     * To avoid deep recursion, we'll replicate the switch logic.
-                     * For simplicity, we'll use a goto-based approach: */
-
-                    /* We need to execute this instruction. The cleanest way is to
-                     * extract the core dispatch into a helper, but since C doesn't
-                     * allow that easily with our current structure, let's just
-                     * manually run the body by re-entering the main loop. */
-
-                    /* Actually, let's use a simpler approach: save outer state,
-                     * run body instructions through the main loop, then restore. */
-                    pc = save_pc;
-
-                    /* Inline execute the body instruction */
-                    uint16_t bd  = bi->dest;
-                    uint16_t bo1 = bi->operand1;
-                    uint16_t bo2 = bi->operand2;
-
-                    switch (bi->opcode) {
-                    case OP_LOAD_CONST:
-                        if (bo1 < (uint16_t)pkt->constant_count) {
-                            vm->scratchpad[bd].value = pkt->constants[bo1].value;
-                            vm->scratchpad[bd].tags  = 0;
-                        }
-                        break;
-                    case OP_LOAD_FIELD:
-                        vm->scratchpad[bd].value = vm->scratchpad[bo1].value;
-                        vm->scratchpad[bd].tags  = vm->scratchpad[bo1].tags;
-                        break;
-                    case OP_LOAD_NOTHING:
-                        vm->scratchpad[bd].value = make_nothing(arena);
-                        vm->scratchpad[bd].tags  = 0;
-                        break;
-                    case OP_COPY:
-                        vm->scratchpad[bd].value = vm->scratchpad[bo1].value;
-                        vm->scratchpad[bd].tags  = vm->scratchpad[bo1].tags;
-                        break;
-                    case OP_ADD: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb) {
-                            if (va->kind == VAL_INTEGER && vb->kind == VAL_INTEGER)
-                                vm->scratchpad[bd].value = make_integer(arena,
-                                    va->as.integer_val + vb->as.integer_val);
-                            else
-                                vm->scratchpad[bd].value = make_float(arena,
-                                    to_double(va) + to_double(vb));
-                            vm->scratchpad[bd].tags = 0;
-                            propagate_tags(vm, bd, bi,
-                                vm->scratchpad[bo1].tags | vm->scratchpad[bo2].tags);
-                        }
-                        break;
-                    }
-                    case OP_SUB: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb) {
-                            if (va->kind == VAL_INTEGER && vb->kind == VAL_INTEGER)
-                                vm->scratchpad[bd].value = make_integer(arena,
-                                    va->as.integer_val - vb->as.integer_val);
-                            else
-                                vm->scratchpad[bd].value = make_float(arena,
-                                    to_double(va) - to_double(vb));
-                            vm->scratchpad[bd].tags = 0;
-                            propagate_tags(vm, bd, bi,
-                                vm->scratchpad[bo1].tags | vm->scratchpad[bo2].tags);
-                        }
-                        break;
-                    }
-                    case OP_MUL: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb) {
-                            if (va->kind == VAL_INTEGER && vb->kind == VAL_INTEGER)
-                                vm->scratchpad[bd].value = make_integer(arena,
-                                    va->as.integer_val * vb->as.integer_val);
-                            else
-                                vm->scratchpad[bd].value = make_float(arena,
-                                    to_double(va) * to_double(vb));
-                            vm->scratchpad[bd].tags = 0;
-                            propagate_tags(vm, bd, bi,
-                                vm->scratchpad[bo1].tags | vm->scratchpad[bo2].tags);
-                        }
-                        break;
-                    }
-                    case OP_DIV: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb) {
-                            if (va->kind == VAL_INTEGER && vb->kind == VAL_INTEGER) {
-                                if (vb->as.integer_val != 0)
-                                    vm->scratchpad[bd].value = make_integer(arena,
-                                        va->as.integer_val / vb->as.integer_val);
-                            } else {
-                                vm->scratchpad[bd].value = make_float(arena,
-                                    to_double(va) / to_double(vb));
-                            }
-                            vm->scratchpad[bd].tags = 0;
-                            propagate_tags(vm, bd, bi,
-                                vm->scratchpad[bo1].tags | vm->scratchpad[bo2].tags);
-                        }
-                        break;
-                    }
-                    case OP_MOD: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb && va->kind == VAL_INTEGER &&
-                            vb->kind == VAL_INTEGER && vb->as.integer_val != 0) {
-                            vm->scratchpad[bd].value = make_integer(arena,
-                                va->as.integer_val % vb->as.integer_val);
-                            vm->scratchpad[bd].tags = 0;
-                            propagate_tags(vm, bd, bi,
-                                vm->scratchpad[bo1].tags | vm->scratchpad[bo2].tags);
-                        }
-                        break;
-                    }
-                    case OP_EQ: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        vm->scratchpad[bd].value = make_boolean(arena,
-                            hval_equal(va, vb));
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_NEQ: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        vm->scratchpad[bd].value = make_boolean(arena,
-                            !hval_equal(va, vb));
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_LT: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                to_double(va) < to_double(vb));
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_GT: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                to_double(va) > to_double(vb));
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_LTE: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                to_double(va) <= to_double(vb));
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_GTE: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                to_double(va) >= to_double(vb));
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_AND: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                va->as.boolean_val && vb->as.boolean_val);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_OR: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        if (va && vb)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                va->as.boolean_val || vb->as.boolean_val);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_NOT: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        if (va)
-                            vm->scratchpad[bd].value = make_boolean(arena,
-                                !va->as.boolean_val);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_STR_CONCAT: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        HVal *vb = vm->scratchpad[bo2].value;
-                        const char *sa = val_to_str(arena, va);
-                        const char *sb = val_to_str(arena, vb);
-                        size_t la = strlen(sa), lb = strlen(sb);
-                        char *buf = arena_alloc(arena, la + lb + 1);
-                        memcpy(buf, sa, la);
-                        memcpy(buf + la, sb, lb);
-                        buf[la + lb] = '\0';
-                        vm->scratchpad[bd].value = make_string(arena, buf);
-                        vm->scratchpad[bd].tags = 0;
-                        propagate_tags(vm, bd, bi,
-                            vm->scratchpad[bo1].tags | vm->scratchpad[bo2].tags);
-                        break;
-                    }
-                    case OP_NEGATE: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        if (va && va->kind == VAL_INTEGER)
-                            vm->scratchpad[bd].value = make_integer(arena,
-                                -va->as.integer_val);
-                        else if (va && va->kind == VAL_FLOAT)
-                            vm->scratchpad[bd].value = make_float(arena,
-                                -va->as.float_val);
-                        vm->scratchpad[bd].tags = vm->scratchpad[bo1].tags;
-                        break;
-                    }
-                    case OP_COALESCE: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        if (!va || va->kind == VAL_NOTHING) {
-                            vm->scratchpad[bd].value = vm->scratchpad[bo2].value;
-                            vm->scratchpad[bd].tags  = vm->scratchpad[bo2].tags;
-                        } else {
-                            vm->scratchpad[bd].value = va;
-                            vm->scratchpad[bd].tags  = vm->scratchpad[bo1].tags;
-                        }
-                        break;
-                    }
-                    case OP_STDLIB_CALL: {
-                        HVal *arg = vm->scratchpad[bo2].value;
-                        if (bo1 == 0) {
-                            vm->scratchpad[bd].value = arg ? arg : make_nothing(arena);
-                            vm->scratchpad[bd].tags = 0;
-                        } else {
-                            HelunaError serr = {0};
-                            HVal *ret = vm_stdlib_call(bo1, arg, arena, &serr);
-                            if (!ret && serr.kind != HELUNA_OK) {
-                                vm->error = serr;
-                                vm->had_error = 1;
-                                return NULL;
-                            }
-                            vm->scratchpad[bd].value = ret ? ret : make_nothing(arena);
-                            vm->scratchpad[bd].tags = 0;
-                        }
-                        break;
-                    }
-                    case OP_TO_STRING: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        vm->scratchpad[bd].value = make_string(arena,
-                            val_to_str(arena, va));
-                        vm->scratchpad[bd].tags = vm->scratchpad[bo1].tags;
-                        break;
-                    }
-                    case OP_RECORD_NEW:
-                        vm->scratchpad[bd].value = make_record(arena, NULL);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    case OP_RECORD_SET: {
-                        HVal *rec = vm->scratchpad[bd].value;
-                        HVal *kv = vm->scratchpad[bo1].value;
-                        HVal *vv = vm->scratchpad[bo2].value;
-                        if (rec && rec->kind == VAL_RECORD && kv &&
-                            kv->kind == VAL_STRING) {
-                            HField *nf = arena_calloc(arena, sizeof(HField));
-                            nf->name = kv->as.string_val;
-                            nf->value = vv;
-                            if (!rec->as.record_fields) {
-                                rec->as.record_fields = nf;
-                            } else {
-                                HField *last = rec->as.record_fields;
-                                while (last->next) last = last->next;
-                                last->next = nf;
-                            }
-                            vm->scratchpad[bd].tags |= vm->scratchpad[bo2].tags;
-                        }
-                        break;
-                    }
-                    case OP_RECORD_GET: {
-                        HVal *rec = vm->scratchpad[bo1].value;
-                        HVal *kv = vm->scratchpad[bo2].value;
-                        if (rec && rec->kind == VAL_RECORD && kv &&
-                            kv->kind == VAL_STRING) {
-                            HField *f = record_get_field(rec, kv->as.string_val);
-                            vm->scratchpad[bd].value = f ? f->value :
-                                make_nothing(arena);
-                        } else {
-                            vm->scratchpad[bd].value = make_nothing(arena);
-                        }
-                        vm->scratchpad[bd].tags = vm->scratchpad[bo1].tags;
-                        break;
-                    }
-                    case OP_TAG_SET: {
-                        uint64_t bits = 0;
-                        if (bo1 < (uint16_t)pkt->constant_count) {
-                            HVal *cv = pkt->constants[bo1].value;
-                            if (cv && cv->kind == VAL_INTEGER)
-                                bits = (uint64_t)cv->as.integer_val;
-                        }
-                        vm->scratchpad[bd].tags |= bits;
-                        break;
-                    }
-                    case OP_TAG_CHECK: {
-                        uint64_t bits = 0;
-                        if (bo2 < (uint16_t)pkt->constant_count) {
-                            HVal *cv = pkt->constants[bo2].value;
-                            if (cv && cv->kind == VAL_INTEGER)
-                                bits = (uint64_t)cv->as.integer_val;
-                        }
-                        vm->scratchpad[bd].value = make_boolean(arena,
-                            (vm->scratchpad[bo1].tags & bits) == bits);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_IS_NOTHING: {
-                        HVal *va = vm->scratchpad[bo1].value;
-                        vm->scratchpad[bd].value = make_boolean(arena,
-                            !va || va->kind == VAL_NOTHING);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    case OP_JUMP:
-                        /* Jumps within body: relative to body */
-                        break;
-                    case OP_JUMP_IF: {
-                        HVal *cond = vm->scratchpad[bo1].value;
-                        if (cond && cond->kind == VAL_BOOLEAN &&
-                            cond->as.boolean_val) {
-                            /* Jump target is absolute in body */
-                            bpc = bd - 1; /* -1 because for-loop increments */
-                        }
-                        break;
-                    }
-                    case OP_JUMP_IF_NOT: {
-                        HVal *cond = vm->scratchpad[bo1].value;
-                        if (!cond || cond->kind != VAL_BOOLEAN ||
-                            !cond->as.boolean_val) {
-                            bpc = bd - 1;
-                        }
-                        break;
-                    }
-                    case OP_SOURCE_LOOKUP: {
-                        HVal *skeys = vm->scratchpad[bo2].value;
-                        HVal *sresult = vm_source_resolve(vm, bo1, skeys);
-                        vm->scratchpad[bd].value = sresult ? sresult : make_nothing(arena);
-                        vm->scratchpad[bd].tags = 0;
-                        break;
-                    }
-                    default:
-                        break;
-                    }
-
-                    if (vm->had_error) return NULL;
+            /* Empty list: store empty result, skip to after ITER_COLLECT */
+            if (!source->as.list_head) {
+                uint16_t result_dest = collect->dest;
+                if (mode == ITER_FOLD) {
+                    vm->scratchpad[result_dest].value =
+                        vm->scratchpad[collect->operand1].value;
+                } else {
+                    vm->scratchpad[result_dest].value = make_list(arena, NULL);
                 }
-
-                /* Collect per-iteration result */
-                switch (mode) {
-                case ITER_MAP: {
-                    HVal *item = arena_calloc(arena, sizeof(HVal));
-                    HVal *src = vm->scratchpad[slot_a].value;
-                    if (src) *item = *src; else item->kind = VAL_NOTHING;
-                    item->next = NULL;
-                    *result_tail = item;
-                    result_tail = &item->next;
-                    break;
-                }
-                case ITER_FILTER: {
-                    HVal *cond = vm->scratchpad[slot_a].value;
-                    if (cond && cond->kind == VAL_BOOLEAN && cond->as.boolean_val) {
-                        HVal *val = vm->scratchpad[slot_b].value;
-                        HVal *item = arena_calloc(arena, sizeof(HVal));
-                        if (val) *item = *val; else item->kind = VAL_NOTHING;
-                        item->next = NULL;
-                        *result_tail = item;
-                        result_tail = &item->next;
-                    }
-                    break;
-                }
-                case ITER_FOLD: {
-                    acc = vm->scratchpad[slot_a].value;
-                    break;
-                }
-                }
-            }
-
-            /* Store result */
-            switch (mode) {
-            case ITER_MAP:
-            case ITER_FILTER:
-                vm->scratchpad[result_dest].value = make_list(arena, result_head);
                 vm->scratchpad[result_dest].tags = 0;
-                break;
-            case ITER_FOLD:
-                vm->scratchpad[result_dest].value = acc ? acc : make_nothing(arena);
-                vm->scratchpad[result_dest].tags = 0;
-                break;
+                result_slot = result_dest;
+                pc = collect_pc_val + 1;
+                continue;
             }
 
-            result_slot = result_dest;
+            /* Push iteration frame (allocate stack lazily) */
+            if (!vm->iter_stack) {
+                vm->iter_stack = arena_calloc(arena,
+                    VM_MAX_ITER_DEPTH * sizeof(VmIterFrame));
+            }
+            if (vm->iter_depth >= VM_MAX_ITER_DEPTH) {
+                vm_error(vm, "ITER_SETUP: iteration nesting too deep");
+                return NULL;
+            }
+            VmIterFrame *frame = &vm->iter_stack[vm->iter_depth++];
+            frame->mode        = mode;
+            frame->next_elem   = source->as.list_head->next;
+            frame->elem_slot   = elem_slot;
+            frame->source_slot = source_slot;
+            frame->body_start  = body_start;
+            frame->collect_pc  = collect_pc_val;
+            frame->result_dest = collect->dest;
+            frame->slot_a      = collect->operand1;
+            frame->slot_b      = collect->operand2;
+            frame->result_head = NULL;
+            frame->result_tail = &frame->result_head;
+            frame->acc         = (mode == ITER_FOLD)
+                                 ? vm->scratchpad[collect->operand1].value
+                                 : NULL;
 
-            /* Skip past body + ITER_COLLECT */
-            pc = collect_pc + 1;
+            /* Place first element and jump to body start */
+            vm->scratchpad[elem_slot].value = source->as.list_head;
+            vm->scratchpad[elem_slot].tags  = vm->scratchpad[source_slot].tags;
+
+            pc = body_start;
             continue;
         }
 
-        case OP_ITER_COLLECT:
-            /* Handled inside ITER_SETUP */
+        case OP_ITER_COLLECT: {
+            if (vm->iter_depth <= 0) {
+                /* Not inside iteration — no-op (shouldn't happen) */
+                break;
+            }
+            VmIterFrame *frame = &vm->iter_stack[vm->iter_depth - 1];
+
+            /* Collect current element's result */
+            switch (frame->mode) {
+            case ITER_MAP: {
+                HVal *item = arena_calloc(arena, sizeof(HVal));
+                HVal *src = vm->scratchpad[frame->slot_a].value;
+                if (src) *item = *src; else item->kind = VAL_NOTHING;
+                item->next = NULL;
+                *frame->result_tail = item;
+                frame->result_tail = &item->next;
+                break;
+            }
+            case ITER_FILTER: {
+                HVal *cond = vm->scratchpad[frame->slot_a].value;
+                if (cond && cond->kind == VAL_BOOLEAN && cond->as.boolean_val) {
+                    HVal *val = vm->scratchpad[frame->slot_b].value;
+                    HVal *item = arena_calloc(arena, sizeof(HVal));
+                    if (val) *item = *val; else item->kind = VAL_NOTHING;
+                    item->next = NULL;
+                    *frame->result_tail = item;
+                    frame->result_tail = &item->next;
+                }
+                break;
+            }
+            case ITER_FOLD:
+                frame->acc = vm->scratchpad[frame->slot_a].value;
+                break;
+            }
+
+            /* Advance to next element */
+            if (frame->next_elem) {
+                vm->scratchpad[frame->elem_slot].value = frame->next_elem;
+                vm->scratchpad[frame->elem_slot].tags  =
+                    vm->scratchpad[frame->source_slot].tags;
+                frame->next_elem = frame->next_elem->next;
+                pc = frame->body_start;
+                continue;
+            }
+
+            /* Iteration done — pop frame and store final result */
+            uint16_t result_dest = frame->result_dest;
+            vm->iter_depth--;
+
+            switch (frame->mode) {
+            case ITER_MAP:
+            case ITER_FILTER:
+                vm->scratchpad[result_dest].value =
+                    make_list(arena, frame->result_head);
+                vm->scratchpad[result_dest].tags = 0;
+                break;
+            case ITER_FOLD:
+                vm->scratchpad[result_dest].value =
+                    frame->acc ? frame->acc : vm->val_nothing;
+                vm->scratchpad[result_dest].tags = 0;
+                break;
+            }
+            result_slot = result_dest;
             break;
+        }
 
         /* ── Stdlib dispatch ── */
 
@@ -1829,7 +1538,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                 /* func_id=0: sanitizer or cross-contract 'uses' call.
                  * Reference VM cannot resolve these — passthrough the
                  * argument value and apply tag mode from flags. */
-                vm->scratchpad[d].value = arg ? arg : make_nothing(arena);
+                vm->scratchpad[d].value = arg ? arg : vm->val_nothing;
                 vm->scratchpad[d].tags = 0;
                 propagate_tags(vm, d, ins, vm->scratchpad[o2].tags);
             } else {
@@ -1840,7 +1549,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                     vm->had_error = 1;
                     return NULL;
                 }
-                vm->scratchpad[d].value = ret ? ret : make_nothing(arena);
+                vm->scratchpad[d].value = ret ? ret : vm->val_nothing;
                 vm->scratchpad[d].tags = 0;
                 propagate_tags(vm, d, ins, vm->scratchpad[o2].tags);
             }
@@ -1872,8 +1581,8 @@ HVal *vm_execute(Vm *vm, HVal *input) {
                     bits = (uint64_t)cv->as.integer_val;
                 }
             }
-            vm->scratchpad[d].value = make_boolean(arena,
-                (vm->scratchpad[o1].tags & bits) == bits);
+            vm->scratchpad[d].value = ((vm->scratchpad[o1].tags & bits) == bits)
+                ? vm->val_true : vm->val_false;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1883,7 +1592,7 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             int source_idx = o1;
             HVal *keys = vm->scratchpad[o2].value;
             HVal *result_val = vm_source_resolve(vm, source_idx, keys);
-            vm->scratchpad[d].value = result_val ? result_val : make_nothing(arena);
+            vm->scratchpad[d].value = result_val ? result_val : vm->val_nothing;
             vm->scratchpad[d].tags = 0;
             result_slot = d;
             break;
@@ -1905,5 +1614,5 @@ HVal *vm_execute(Vm *vm, HVal *input) {
         return vm->scratchpad[result_slot].value;
     }
 
-    return make_nothing(arena);
+    return vm->val_nothing;
 }
