@@ -35,9 +35,12 @@ TOOLS_BIN  = $(TOOLS_SRC:tools/%.c=bin/%)
 TEST_SRC   = $(wildcard test/*.c)
 TEST_BIN   = $(TEST_SRC:test/%.c=build/test/%)
 
+BENCH_SRC  = $(wildcard bench/*.c)
+BENCH_BIN  = $(BENCH_SRC:bench/%.c=build/bench/%)
+
 # ── Targets ──────────────────────────────────────────────
 
-.PHONY: all clean test
+.PHONY: all clean test bench
 
 all: $(TOOLS_BIN)
 
@@ -71,6 +74,14 @@ test: $(TEST_BIN)
 build/test/%: test/%.c $(LIB) | build/test
 	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
+# ── Benchmarks ──────────────────────────────────────────
+
+bench: $(BENCH_BIN)
+	@for b in $(BENCH_BIN); do $$b; done
+
+build/bench/%: bench/%.c $(LIB) | build/bench
+	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+
 # ── Directories ──────────────────────────────────────────
 
 build/obj:
@@ -80,6 +91,9 @@ build/obj/vendor:
 	@mkdir -p $@
 
 build/test:
+	@mkdir -p $@
+
+build/bench:
 	@mkdir -p $@
 
 bin:

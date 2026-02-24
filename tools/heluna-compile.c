@@ -13,6 +13,7 @@
 #include "heluna/lexer.h"
 #include "heluna/arena.h"
 #include "heluna/errors.h"
+#include "heluna/version.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -253,6 +254,11 @@ static char *default_output_path(const char *input_path) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("heluna-compile %s\n", HELUNA_VERSION);
+        return 0;
+    }
+
     if (argc < 2) {
         fprintf(stderr, "usage: heluna-compile <file.heluna> [-o output.hlna]\n");
         return 1;

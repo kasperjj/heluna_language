@@ -1,0 +1,170 @@
+# Benchmark fixture: complex function contract exercising major language features
+
+contract complex
+  input
+    name as string,
+    age as integer,
+    score as float,
+    values as list of integer,
+    nickname as maybe string,
+    active as boolean
+  end
+
+  output
+    label as string,
+    age-bracket as string,
+    adjusted-score as float,
+    high-values as list of integer,
+    doubled as list of integer,
+    total as integer,
+    display-name as string,
+    status as string,
+    value-type as string,
+    parity as string
+  end
+
+  rules
+    require output.adjusted-score
+      output.adjusted-score >= 0.0
+      else reject "adjusted score must not be negative"
+    end
+  end
+
+  tests
+    test "full input with nickname"
+      given {
+        name: "alice",
+        age: 30,
+        score: 85.5,
+        values: [10, 25, 30, 5, 40, 15, 50, 8, 35, 20, 45, 12, 28, 33, 7, 42, 18, 22, 38, 3],
+        nickname: "Ally",
+        active: true
+      }
+      expect {
+        label: "ALICE (30)",
+        age-bracket: "young adult",
+        adjusted-score: 90.5,
+        high-values: [25, 30, 40, 50, 35, 45, 28, 33, 42, 22, 38],
+        doubled: [50, 60, 80, 100, 70, 90, 56, 66, 84, 44, 76],
+        total: 776,
+        display-name: "Ally",
+        status: "active",
+        value-type: "has values",
+        parity: "even"
+      }
+    end
+
+    test "no nickname and inactive"
+      given {
+        name: "bob",
+        age: 70,
+        score: 50.0,
+        values: [1, 2, 3],
+        nickname: nothing,
+        active: false
+      }
+      expect {
+        label: "BOB (70)",
+        age-bracket: "senior",
+        adjusted-score: 40.0,
+        high-values: [],
+        doubled: [],
+        total: 0,
+        display-name: "bob",
+        status: "inactive",
+        value-type: "has values",
+        parity: "even"
+      }
+    end
+
+    test "teenager with odd age"
+      given {
+        name: "charlie",
+        age: 15,
+        score: 72.3,
+        values: [100],
+        nickname: nothing,
+        active: true
+      }
+      expect {
+        label: "CHARLIE (15)",
+        age-bracket: "teenager",
+        adjusted-score: 82.3,
+        high-values: [100],
+        doubled: [200],
+        total: 200,
+        display-name: "charlie",
+        status: "active",
+        value-type: "has values",
+        parity: "odd"
+      }
+    end
+  end
+end
+
+define complex with input
+  # String operation via through pipeline + stdlib (upper)
+  let upper-name be $name through upper({})
+  let label be upper-name + " (" + to-string({ value: $age }).value + ")"
+
+  # match/when/then with range (between...and) and binding+guard patterns
+  let age-bracket be match $age
+    when between 0 and 12 then "child"
+    when between 13 and 17 then "teenager"
+    when between 18 and 39 then "young adult"
+    when between 40 and 64 then "middle aged"
+    when n and n >= 65 then "senior"
+    else "unknown"
+  end
+
+  # if/then/else + arithmetic
+  let bonus be
+    if $active then 5.0
+    else -10.0
+    end
+
+  let adjusted-score be $score + bonus
+
+  # filter...where
+  let high-values be filter $values where v v > 20 end
+
+  # map...as...do
+  let doubled be map high-values as v do v * 2 end
+
+  # fold stdlib call
+  let total be fold({ list: doubled, initial: 0, fn: "add" })
+
+  # or else coalesce
+  let display-name be $nickname or else $name
+
+  # is type test
+  let value-type be
+    if $values is list then "has values"
+    else "no values"
+    end
+
+  # mod operator
+  let parity be
+    if $age mod 2 = 0 then "even"
+    else "odd"
+    end
+
+  # status from boolean
+  let status be
+    if $active then "active"
+    else "inactive"
+    end
+
+  result {
+    label: label,
+    age-bracket: age-bracket,
+    adjusted-score: adjusted-score,
+    high-values: high-values,
+    doubled: doubled,
+    total: total,
+    display-name: display-name,
+    status: status,
+    value-type: value-type,
+    parity: parity
+  }
+end

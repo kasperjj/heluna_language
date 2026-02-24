@@ -1,0 +1,40 @@
+# Benchmark fixture: simple function contract
+
+contract simple
+  input
+    first-name as string,
+    last-name as string,
+    age as integer
+  end
+
+  output
+    full-name as string,
+    greeting as string,
+    category as string
+  end
+
+  tests
+    test "basic"
+      given { first-name: "Ada", last-name: "Lovelace", age: 36 }
+      expect { full-name: "Ada Lovelace", greeting: "Hello, Ada Lovelace!", category: "adult" }
+    end
+  end
+end
+
+define simple with input
+  let full-name be $first-name + " " + $last-name
+
+  let greeting be "Hello, " + full-name + "!"
+
+  let category be
+    if $age < 18 then "minor"
+    else if $age >= 65 then "senior"
+    else "adult"
+    end
+
+  result {
+    full-name: full-name,
+    greeting: greeting,
+    category: category
+  }
+end

@@ -12,8 +12,10 @@
 #include "heluna/lexer.h"
 #include "heluna/arena.h"
 #include "heluna/errors.h"
+#include "heluna/version.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -40,6 +42,11 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("heluna-check %s\n", HELUNA_VERSION);
+        return 0;
+    }
+
     if (argc != 2) {
         fprintf(stderr, "usage: heluna-check <file.heluna>\n");
         return 1;

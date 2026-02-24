@@ -13,6 +13,7 @@
 #include "heluna/lexer.h"
 #include "heluna/arena.h"
 #include "heluna/errors.h"
+#include "heluna/version.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,6 +72,11 @@ static char *read_stdin(void) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("heluna-run %s\n", HELUNA_VERSION);
+        return 0;
+    }
+
     if (argc < 2 || argc > 3) {
         fprintf(stderr, "usage: heluna-run <file.heluna> [input.json]\n");
         return 1;
