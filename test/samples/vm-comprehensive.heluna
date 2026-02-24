@@ -1,0 +1,706 @@
+# Comprehensive VM test contract — exercises every language feature and stdlib function.
+# Compiles to a .hlna packet used for test-driven development of new VM implementations.
+# If a VM passes all tests in this packet, it correctly implements the Heluna spec.
+
+contract vm-comprehensive
+
+  tags
+    pii "personally identifiable information",
+    sensitive "sensitive data"
+  end
+
+  sanitizers
+    hash using sha256 strips pii sensitive
+  end
+
+  input
+    text as string,
+    word as string,
+    number as integer,
+    decimal as float,
+    flag as boolean,
+    optional-text as maybe string,
+    optional-number as maybe integer,
+    items as list of integer,
+    names as list of string,
+    nested-numbers as list of list of integer,
+    person as record name as string, age as integer end,
+    people as list of record name as string, age as integer end,
+    encode-text as string,
+    secret-value as string tagged sensitive,
+    personal-name as string tagged pii sensitive,
+    negative as integer,
+    zero as integer,
+    shape-kind as string,
+    dimension-a as float,
+    dimension-b as float
+  end
+
+  output
+    add-int as integer,
+    sub-int as integer,
+    mul-int as integer,
+    div-int as integer,
+    mod-int as integer,
+    neg-int as integer,
+    add-float as float,
+    mul-float as float,
+    cmp-eq as boolean,
+    cmp-neq as boolean,
+    cmp-lt as boolean,
+    cmp-gt as boolean,
+    cmp-lte as boolean,
+    cmp-gte as boolean,
+    bool-and as boolean,
+    bool-or as boolean,
+    bool-not as boolean,
+    bool-compound as boolean,
+    str-concat as string,
+    str-pipeline as string,
+    if-simple as string,
+    if-chained as string,
+    match-literal as string,
+    match-range as string,
+    match-guard as string,
+    match-nothing as string,
+    match-wildcard as string,
+    or-else-text as string,
+    is-nothing-result as boolean,
+    type-is-string as boolean,
+    type-is-integer as boolean,
+    type-is-float as boolean,
+    type-is-boolean as boolean,
+    type-is-list as boolean,
+    type-is-record as boolean,
+    let-result as integer,
+    list-length as integer,
+    filtered-items as list of integer,
+    mapped-items as list of integer,
+    fold-sum as integer,
+    fold-product as integer,
+    record-name as string,
+    record-age as integer,
+    upper-result as string,
+    lower-result as string,
+    trim-result as string,
+    trim-start-result as string,
+    trim-end-result as string,
+    substring-result as string,
+    replace-result as string,
+    split-result as list of string,
+    join-result as string,
+    starts-with-result as boolean,
+    ends-with-result as boolean,
+    contains-result as boolean,
+    str-length-result as integer,
+    pad-left-result as string,
+    pad-right-result as string,
+    regex-replace-result as string,
+    abs-result as integer,
+    ceil-result as integer,
+    floor-result as integer,
+    round-result as integer,
+    min-result as integer,
+    max-result as integer,
+    clamp-result as integer,
+    sort-result as list of integer,
+    sort-by-youngest as string,
+    reverse-result as list of integer,
+    unique-result as list of integer,
+    flatten-result as list of integer,
+    range-result as list of integer,
+    slice-result as list of integer,
+    merge-x as integer,
+    pick-name as string,
+    omit-x as integer,
+    base64-encoded as string,
+    base64-decoded as string,
+    url-encoded as string,
+    url-decoded as string,
+    json-encoded as string,
+    sha256-result as string,
+    hmac-result as string,
+    to-string-result as string,
+    to-int-result as integer,
+    date-add-result as string,
+    match-shape as float,
+    hashed-secret as string,
+    hashed-name as string
+  end
+
+  rules
+    forbid tagged pii in output
+    forbid tagged sensitive in output
+
+    require input.number
+      input.number >= 0
+      else reject "number must be non-negative"
+    end
+
+    match output.if-simple
+      when "big" then true
+      when "small" then true
+      else reject "if-simple must be big or small"
+    end
+  end
+
+  tests
+    test "comprehensive"
+      given {
+        text: "  Hello World  ",
+        word: "hello",
+        number: 17,
+        decimal: 3.14,
+        flag: true,
+        optional-text: "present",
+        optional-number: 42,
+        items: [3, 1, 4, 1, 5, 9, 2, 6],
+        names: ["banana", "apple", "cherry"],
+        nested-numbers: [[1, 2], [3, 4], [5]],
+        person: { name: "Alice", age: 30 },
+        people: [
+          { name: "Charlie", age: 25 },
+          { name: "Alice", age: 30 },
+          { name: "Bob", age: 20 }
+        ],
+        encode-text: "Hello World!",
+        secret-value: "secret123",
+        personal-name: "John Doe",
+        negative: -7,
+        zero: 0,
+        shape-kind: "circle",
+        dimension-a: 5.0,
+        dimension-b: 3.0
+      }
+      expect {
+        add-int: 22,
+        sub-int: 12,
+        mul-int: 51,
+        div-int: 3,
+        mod-int: 2,
+        neg-int: -17,
+        add-float: 5.0,
+        mul-float: 6.28,
+        cmp-eq: true,
+        cmp-neq: true,
+        cmp-lt: true,
+        cmp-gt: true,
+        cmp-lte: true,
+        cmp-gte: true,
+        bool-and: true,
+        bool-or: true,
+        bool-not: true,
+        bool-compound: true,
+        str-concat: "hello world",
+        str-pipeline: "hello world",
+        if-simple: "big",
+        if-chained: "positive",
+        match-literal: "greeting",
+        match-range: "medium",
+        match-guard: "above-ten",
+        match-nothing: "got: present",
+        match-wildcard: "anything",
+        or-else-text: "present",
+        is-nothing-result: false,
+        type-is-string: true,
+        type-is-integer: true,
+        type-is-float: true,
+        type-is-boolean: true,
+        type-is-list: true,
+        type-is-record: true,
+        let-result: 18,
+        list-length: 8,
+        filtered-items: [4, 5, 9, 6],
+        mapped-items: [30, 10, 40, 10, 50, 90, 20, 60],
+        fold-sum: 31,
+        fold-product: 6480,
+        record-name: "Alice",
+        record-age: 30,
+        upper-result: "HELLO",
+        lower-result: "world",
+        trim-result: "Hello World",
+        trim-start-result: "Hello World  ",
+        trim-end-result: "  Hello World",
+        substring-result: "ell",
+        replace-result: "herro",
+        split-result: ["a", "b", "c"],
+        join-result: "banana, apple, cherry",
+        starts-with-result: true,
+        ends-with-result: true,
+        contains-result: true,
+        str-length-result: 5,
+        pad-left-result: "00042",
+        pad-right-result: "hi...",
+        regex-replace-result: "abcNUMdef",
+        abs-result: 7,
+        ceil-result: 4,
+        floor-result: 3,
+        round-result: 4,
+        min-result: -7,
+        max-result: 17,
+        clamp-result: 10,
+        sort-result: [1, 1, 2, 3, 4, 5, 6, 9],
+        sort-by-youngest: "Bob",
+        reverse-result: [3, 2, 1],
+        unique-result: [3, 1, 4, 5, 9, 2, 6],
+        flatten-result: [1, 2, 3, 4, 5],
+        range-result: [1, 2, 3, 4, 5],
+        slice-result: [3, 1, 4],
+        merge-x: 10,
+        pick-name: "Alice",
+        omit-x: 1,
+        base64-encoded: "SGVsbG8gV29ybGQh",
+        base64-decoded: "Hello World!",
+        url-encoded: "Hello%20World%21",
+        url-decoded: "Hello World!",
+        json-encoded: "true",
+        sha256-result: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        hmac-result: "88aab3ede8d3adf94d26ab90d3bafd4a2083070c3bcce9c014ee04a443847c0b",
+        to-string-result: "17",
+        to-int-result: 3,
+        date-add-result: "2024-01-25",
+        match-shape: 78.5,
+        hashed-secret: "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+        hashed-name: "6cea57c2fb6cbc2a40411135005760f241fffc3e5e67ab99882726431037f908"
+      }
+    end
+
+    test "nothing-handling"
+      given {
+        text: "  Hello World  ",
+        word: "hello",
+        number: 17,
+        decimal: 3.14,
+        flag: true,
+        optional-text: nothing,
+        optional-number: nothing,
+        items: [3, 1, 4, 1, 5, 9, 2, 6],
+        names: ["banana", "apple", "cherry"],
+        nested-numbers: [[1, 2], [3, 4], [5]],
+        person: { name: "Alice", age: 30 },
+        people: [
+          { name: "Charlie", age: 25 },
+          { name: "Alice", age: 30 },
+          { name: "Bob", age: 20 }
+        ],
+        encode-text: "Hello World!",
+        secret-value: "secret123",
+        personal-name: "John Doe",
+        negative: -7,
+        zero: 0,
+        shape-kind: "rectangle",
+        dimension-a: 4.0,
+        dimension-b: 3.0
+      }
+      expect {
+        add-int: 22,
+        sub-int: 12,
+        mul-int: 51,
+        div-int: 3,
+        mod-int: 2,
+        neg-int: -17,
+        add-float: 5.0,
+        mul-float: 6.28,
+        cmp-eq: true,
+        cmp-neq: true,
+        cmp-lt: true,
+        cmp-gt: true,
+        cmp-lte: true,
+        cmp-gte: true,
+        bool-and: true,
+        bool-or: true,
+        bool-not: true,
+        bool-compound: true,
+        str-concat: "hello world",
+        str-pipeline: "hello world",
+        if-simple: "big",
+        if-chained: "positive",
+        match-literal: "greeting",
+        match-range: "medium",
+        match-guard: "above-ten",
+        match-nothing: "absent",
+        match-wildcard: "anything",
+        or-else-text: "fallback",
+        is-nothing-result: true,
+        type-is-string: true,
+        type-is-integer: true,
+        type-is-float: true,
+        type-is-boolean: true,
+        type-is-list: true,
+        type-is-record: true,
+        let-result: 18,
+        list-length: 8,
+        filtered-items: [4, 5, 9, 6],
+        mapped-items: [30, 10, 40, 10, 50, 90, 20, 60],
+        fold-sum: 31,
+        fold-product: 6480,
+        record-name: "Alice",
+        record-age: 30,
+        upper-result: "HELLO",
+        lower-result: "world",
+        trim-result: "Hello World",
+        trim-start-result: "Hello World  ",
+        trim-end-result: "  Hello World",
+        substring-result: "ell",
+        replace-result: "herro",
+        split-result: ["a", "b", "c"],
+        join-result: "banana, apple, cherry",
+        starts-with-result: true,
+        ends-with-result: true,
+        contains-result: true,
+        str-length-result: 5,
+        pad-left-result: "00042",
+        pad-right-result: "hi...",
+        regex-replace-result: "abcNUMdef",
+        abs-result: 7,
+        ceil-result: 4,
+        floor-result: 3,
+        round-result: 4,
+        min-result: -7,
+        max-result: 17,
+        clamp-result: 10,
+        sort-result: [1, 1, 2, 3, 4, 5, 6, 9],
+        sort-by-youngest: "Bob",
+        reverse-result: [3, 2, 1],
+        unique-result: [3, 1, 4, 5, 9, 2, 6],
+        flatten-result: [1, 2, 3, 4, 5],
+        range-result: [1, 2, 3, 4, 5],
+        slice-result: [3, 1, 4],
+        merge-x: 10,
+        pick-name: "Alice",
+        omit-x: 1,
+        base64-encoded: "SGVsbG8gV29ybGQh",
+        base64-decoded: "Hello World!",
+        url-encoded: "Hello%20World%21",
+        url-decoded: "Hello World!",
+        json-encoded: "true",
+        sha256-result: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        hmac-result: "88aab3ede8d3adf94d26ab90d3bafd4a2083070c3bcce9c014ee04a443847c0b",
+        to-string-result: "17",
+        to-int-result: 3,
+        date-add-result: "2024-01-25",
+        match-shape: 12.0,
+        hashed-secret: "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+        hashed-name: "6cea57c2fb6cbc2a40411135005760f241fffc3e5e67ab99882726431037f908"
+      }
+    end
+
+    test "empty-lists"
+      given {
+        text: "  Hello World  ",
+        word: "hello",
+        number: 17,
+        decimal: 3.14,
+        flag: true,
+        optional-text: "present",
+        optional-number: 42,
+        items: [],
+        names: [],
+        nested-numbers: [],
+        person: { name: "Alice", age: 30 },
+        people: [],
+        encode-text: "Hello World!",
+        secret-value: "secret123",
+        personal-name: "John Doe",
+        negative: -7,
+        zero: 0,
+        shape-kind: "square",
+        dimension-a: 5.0,
+        dimension-b: 5.0
+      }
+      expect {
+        add-int: 22,
+        sub-int: 12,
+        mul-int: 51,
+        div-int: 3,
+        mod-int: 2,
+        neg-int: -17,
+        add-float: 5.0,
+        mul-float: 6.28,
+        cmp-eq: true,
+        cmp-neq: true,
+        cmp-lt: true,
+        cmp-gt: true,
+        cmp-lte: true,
+        cmp-gte: true,
+        bool-and: true,
+        bool-or: true,
+        bool-not: true,
+        bool-compound: true,
+        str-concat: "hello world",
+        str-pipeline: "hello world",
+        if-simple: "big",
+        if-chained: "positive",
+        match-literal: "greeting",
+        match-range: "medium",
+        match-guard: "above-ten",
+        match-nothing: "got: present",
+        match-wildcard: "anything",
+        or-else-text: "present",
+        is-nothing-result: false,
+        type-is-string: true,
+        type-is-integer: true,
+        type-is-float: true,
+        type-is-boolean: true,
+        type-is-list: true,
+        type-is-record: true,
+        let-result: 18,
+        list-length: 0,
+        filtered-items: [],
+        mapped-items: [],
+        fold-sum: 0,
+        fold-product: 1,
+        record-name: "Alice",
+        record-age: 30,
+        upper-result: "HELLO",
+        lower-result: "world",
+        trim-result: "Hello World",
+        trim-start-result: "Hello World  ",
+        trim-end-result: "  Hello World",
+        substring-result: "ell",
+        replace-result: "herro",
+        split-result: ["a", "b", "c"],
+        join-result: "",
+        starts-with-result: true,
+        ends-with-result: true,
+        contains-result: true,
+        str-length-result: 5,
+        pad-left-result: "00042",
+        pad-right-result: "hi...",
+        regex-replace-result: "abcNUMdef",
+        abs-result: 7,
+        ceil-result: 4,
+        floor-result: 3,
+        round-result: 4,
+        min-result: -7,
+        max-result: 17,
+        clamp-result: 10,
+        sort-result: [],
+        sort-by-youngest: "none",
+        reverse-result: [3, 2, 1],
+        unique-result: [],
+        flatten-result: [],
+        range-result: [1, 2, 3, 4, 5],
+        slice-result: [],
+        merge-x: 10,
+        pick-name: "Alice",
+        omit-x: 1,
+        base64-encoded: "SGVsbG8gV29ybGQh",
+        base64-decoded: "Hello World!",
+        url-encoded: "Hello%20World%21",
+        url-decoded: "Hello World!",
+        json-encoded: "true",
+        sha256-result: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        hmac-result: "88aab3ede8d3adf94d26ab90d3bafd4a2083070c3bcce9c014ee04a443847c0b",
+        to-string-result: "17",
+        to-int-result: 3,
+        date-add-result: "2024-01-25",
+        match-shape: 0.0,
+        hashed-secret: "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",
+        hashed-name: "6cea57c2fb6cbc2a40411135005760f241fffc3e5e67ab99882726431037f908"
+      }
+    end
+  end
+end
+
+define vm-comprehensive with input
+  # --- Let binding (tests intermediate value) ---
+  let let-val be $number + 1
+
+  # --- Match expressions ---
+  let match-literal-val be match $word
+    when "hello" then "greeting"
+    when "bye" then "farewell"
+    else "other"
+  end
+
+  let match-range-val be match $number
+    when between 1 and 10 then "small"
+    when between 11 and 100 then "medium"
+    else "large"
+  end
+
+  let match-guard-val be match $number
+    when n and n > 10 then "above-ten"
+    else "at-most-ten"
+  end
+
+  let match-nothing-val be match $optional-text
+    when nothing then "absent"
+    when t then "got: " + t
+  end
+
+  # --- If/else ---
+  let if-simple-val be
+    if $number > 10 then "big"
+    else "small"
+    end
+
+  let if-chained-val be
+    if $number < 0 then "negative"
+    else if $number = 0 then "zero"
+    else "positive"
+    end
+
+  # --- List operations ---
+  let filtered be filter $items where n n > 3 end
+  let mapped be map $items as n do n * 10 end
+  let fold-sum-val be fold({ list: $items, initial: 0, fn: "add" })
+  let fold-product-val be fold({ list: $items, initial: 1, fn: "multiply" })
+
+  # --- Sort-by with safe access ---
+  let sorted-people be sort-by({ list: $people, field: "age" })
+  let sort-by-youngest-val be match sorted-people
+    when [first, ..rest] then first.name
+    when [] then "none"
+  end
+
+  # --- Record stdlib ---
+  let merged-rec be merge({ a: { x: 1 }, b: { y: 2, x: 10 } })
+  let picked-rec be pick({ record: $person, fields: ["name"] })
+  let omitted-rec be omit({ record: { x: 1, y: 2, z: 3 }, fields: ["y", "z"] })
+
+  # --- Pattern matching on shape ---
+  let match-shape-val be match $shape-kind
+    when "circle" then 3.14 * $dimension-a * $dimension-a
+    when "rectangle" then $dimension-a * $dimension-b
+    else 0.0
+  end
+
+  # --- Security: sanitize tagged data ---
+  let hashed-secret-val be hash({ value: $secret-value })
+  let hashed-name-val be hash({ value: $personal-name })
+
+  result {
+    # --- Arithmetic ---
+    add-int: $number + 5,
+    sub-int: $number - 5,
+    mul-int: $number * 3,
+    div-int: $number / 5,
+    mod-int: $number % 5,
+    neg-int: -$number,
+    add-float: $decimal + 1.86,
+    mul-float: $decimal * 2.0,
+
+    # --- Comparison ---
+    cmp-eq: $number = 17,
+    cmp-neq: $number != 0,
+    cmp-lt: $zero < $number,
+    cmp-gt: $number > $zero,
+    cmp-lte: $zero <= $zero,
+    cmp-gte: $number >= 17,
+
+    # --- Boolean logic ---
+    bool-and: $flag and true,
+    bool-or: false or $flag,
+    bool-not: not false,
+    bool-compound: ($flag and true) or false,
+
+    # --- String ---
+    str-concat: $word + " world",
+    str-pipeline: $text through trim({}) through lower({}),
+
+    # --- If/else ---
+    if-simple: if-simple-val,
+    if-chained: if-chained-val,
+
+    # --- Match ---
+    match-literal: match-literal-val,
+    match-range: match-range-val,
+    match-guard: match-guard-val,
+    match-nothing: match-nothing-val,
+    match-wildcard: match 42 when _ then "anything" end,
+
+    # --- Maybe/nothing ---
+    or-else-text: $optional-text or else "fallback",
+    is-nothing-result: $optional-number is nothing,
+
+    # --- Type testing ---
+    type-is-string: $word is string,
+    type-is-integer: $number is integer,
+    type-is-float: $decimal is float,
+    type-is-boolean: $flag is boolean,
+    type-is-list: $items is list,
+    type-is-record: $person is record,
+
+    # --- Let binding ---
+    let-result: let-val,
+
+    # --- List operations ---
+    list-length: length({ list: $items }),
+    filtered-items: filtered,
+    mapped-items: mapped,
+    fold-sum: fold-sum-val,
+    fold-product: fold-product-val,
+
+    # --- Record access ---
+    record-name: $person.name,
+    record-age: $person.age,
+
+    # --- Stdlib: string ---
+    upper-result: upper({ value: $word }),
+    lower-result: lower({ value: "WORLD" }),
+    trim-result: trim({ value: $text }),
+    trim-start-result: trim-start({ value: $text }),
+    trim-end-result: trim-end({ value: $text }),
+    substring-result: substring({ value: $word, start: 1, end: 4 }),
+    replace-result: replace({ value: $word, find: "l", replacement: "r" }),
+    split-result: split({ value: "a,b,c", delimiter: "," }),
+    join-result: join({ list: $names, delimiter: ", " }),
+    starts-with-result: starts-with({ value: $word, prefix: "hel" }),
+    ends-with-result: ends-with({ value: $word, suffix: "llo" }),
+    contains-result: contains({ value: $word, search: "ell" }),
+    str-length-result: length({ value: $word }),
+    pad-left-result: pad-left({ value: "42", width: 5, fill: "0" }),
+    pad-right-result: pad-right({ value: "hi", width: 5, fill: "." }),
+    regex-replace-result: regex-replace({ value: "abc123def", pattern: "[0-9]+", replacement: "NUM" }),
+
+    # --- Stdlib: numeric ---
+    abs-result: abs({ value: $negative }),
+    ceil-result: ceil({ value: $decimal }),
+    floor-result: floor({ value: $decimal }),
+    round-result: round({ value: 3.5 }),
+    min-result: min({ a: $number, b: $negative }),
+    max-result: max({ a: $number, b: $negative }),
+    clamp-result: clamp({ value: 50, low: 0, high: 10 }),
+
+    # --- Stdlib: list ---
+    sort-result: sort({ list: $items }),
+    sort-by-youngest: sort-by-youngest-val,
+    reverse-result: reverse({ list: [1, 2, 3] }),
+    unique-result: unique({ list: $items }),
+    flatten-result: flatten({ list: $nested-numbers }),
+    range-result: range({ start: 1, end: 5 }),
+    slice-result: slice({ list: $items, start: 0, end: 3 }),
+
+    # --- Stdlib: record ---
+    merge-x: merged-rec.x,
+    pick-name: picked-rec.name,
+    omit-x: omitted-rec.x,
+
+    # --- Stdlib: encoding ---
+    base64-encoded: base64-encode({ value: $encode-text }),
+    base64-decoded: base64-decode({ value: "SGVsbG8gV29ybGQh" }),
+    url-encoded: url-encode({ value: $encode-text }),
+    url-decoded: url-decode({ value: "Hello%20World%21" }),
+    json-encoded: json-encode({ value: true }),
+
+    # --- Stdlib: crypto ---
+    sha256-result: sha256({ value: $word }),
+    hmac-result: hmac-sha256({ value: $word, key: "secret" }),
+
+    # --- Stdlib: conversion ---
+    to-string-result: to-string({ value: $number }).value,
+    to-int-result: to-integer({ value: $decimal }),
+
+    # --- Stdlib: date ---
+    date-add-result: date-add({ date: "2024-01-15", amount: 10, unit: "days" }),
+
+    # --- Pattern matching on shape ---
+    match-shape: match-shape-val,
+
+    # --- Security (sanitized tagged data) ---
+    hashed-secret: hashed-secret-val,
+    hashed-name: hashed-name-val
+  }
+end
