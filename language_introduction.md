@@ -251,6 +251,66 @@ end
 
 You can't ignore the `nothing` case. If your match doesn't cover it, the compiler tells you. No silent nulls sneaking through.
 
+### Type Testing with `is`
+
+Sometimes you need a simple type check without the full weight of pattern matching. The `is` keyword tests whether a value is a specific type and returns a boolean.
+
+```heluna
+$value is integer    # true if $value is an integer
+$value is nothing    # true if $value is absent
+$value is string     # true if $value is a string
+```
+
+This is useful in conditional expressions:
+
+```heluna
+if $score is integer then $score * 2
+else 0
+end
+```
+
+The supported type keywords after `is` are: `string`, `integer`, `float`, `boolean`, `nothing`, `list`, and `record`.
+
+### Fallback Values with `or else`
+
+When working with `maybe` values, the most common pattern is "use this value, but if it's `nothing`, use a fallback instead." The `or else` expression handles this directly, without needing a `match`:
+
+```heluna
+$title or else "Untitled"
+```
+
+This evaluates the left-hand side. If the result is `nothing`, it evaluates and returns the right-hand side instead. Compare the `match` equivalent — `or else` is more concise for simple defaults:
+
+```heluna
+# These two are equivalent:
+$title or else "Untitled"
+
+match $title
+  when nothing then "Untitled"
+  when t then t
+end
+```
+
+Use `match` when you need to transform the present value or handle multiple cases. Use `or else` when you just need a fallback.
+
+---
+
+## Arithmetic: The `mod` Operator
+
+Heluna provides the standard arithmetic operators (`+`, `-`, `*`, `/`) and a `mod` keyword for the remainder operation. Like other Heluna operators, it uses an English word rather than a symbol.
+
+```heluna
+17 mod 5     # equals 2
+10 mod 3     # equals 1
+```
+
+`mod` sits at the same precedence level as `*` and `/`, so it interacts naturally with other arithmetic:
+
+```heluna
+$total + $quantity mod 10
+# parses as: $total + ($quantity mod 10)
+```
+
 ---
 
 ## Working with Lists: `map`, `filter`, and `through`
@@ -697,6 +757,9 @@ Heluna handles step 3 and 4. Everything else is your code, in whatever language 
 | Conditionals | `if ... then ... else ... end` | `if/else` with braces or ternary |
 | Pattern matching | `match ... when ... then ... end` | `switch`, `match`, `case` |
 | Null handling | `maybe` type + `nothing` | `null`, `nil`, `None`, `Optional` |
+| Fallback/coalesce | `expr or else default` | `??`, `\|\|`, `.unwrap_or()` |
+| Type testing | `expr is integer` | `typeof`, `isinstance()` |
+| Remainder | `a mod b` | `a % b` |
 | List transform | `map list as x do ... end` | `.map(x => ...)` |
 | List filter | `filter list where x ... end` | `.filter(x => ...)` |
 | Pipeline | `expr through fn({})` | `expr \|> fn` / method chaining |

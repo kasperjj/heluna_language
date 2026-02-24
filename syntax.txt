@@ -24,7 +24,8 @@ Keyword       ::= 'contract' | 'uses' | 'tags' | 'tagged' | 'sanitizers'
                  | 'boolean' | 'maybe' | 'list' | 'of' | 'record'
                  | 'define' | 'with' | 'let' | 'be' | 'result' | 'if'
                  | 'then' | 'else' | 'end' | 'match' | 'when' | 'between'
-                 | 'and' | 'or' | 'not' | 'in' | 'through' | 'map' | 'do'
+                 | 'and' | 'or' | 'not' | 'in' | 'is' | 'through'
+                 | 'map' | 'mod' | 'do'
                  | 'filter' | 'where' | 'true' | 'false' | 'nothing'
                  | 'source' | 'sources' | 'keyed-by' | 'returns' | 'lookup'
                  | 'using'
@@ -49,15 +50,17 @@ Expression    ::= LetExpr | IfExpr | MatchExpr | FilterExpr
 
 ThroughExpr   ::= OrExpr ('through' (FunctionCall | FilterExpr | MapExpr))*
 
-OrExpr        ::= AndExpr ('or' AndExpr)*
+OrExpr        ::= AndExpr (('or' 'else' AndExpr) | ('or' AndExpr))*
 AndExpr       ::= NotExpr ('and' NotExpr)*
 NotExpr       ::= 'not' NotExpr | CompareExpr
 
-CompareExpr   ::= ArithExpr (CompareOp ArithExpr)?
+CompareExpr   ::= ArithExpr (CompareOp ArithExpr | 'is' TypeKeyword)?
 CompareOp     ::= '=' | '!=' | '<' | '>' | '<=' | '>='
+TypeKeyword   ::= 'string' | 'integer' | 'float' | 'boolean'
+               |  'nothing' | 'list' | 'record'
 
 ArithExpr     ::= Term (('+' | '-') Term)*
-Term          ::= Unary (('*' | '/' | '%') Unary)*
+Term          ::= Unary (('*' | '/' | '%' | 'mod') Unary)*
 Unary         ::= '-' Unary | Atom
 
 Atom          ::= Literal Accessor*

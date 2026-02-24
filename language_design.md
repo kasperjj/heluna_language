@@ -72,7 +72,9 @@ This separation follows the same principle as the rest of Heluna: make dependenc
 The `lookup` expression (`lookup source-name where key = expr end`) returns a `maybe record`, forcing the function author to handle the case where no data is found. Tags on the source contract's `returns` type propagate through the lookup result, so the tag system automatically tracks sensitivity of externally sourced data.
 
 ### Readable Over Terse
-Heluna uses English keywords where most languages use symbols. through instead of |>. and instead of &&. match...when...then...end instead of curly braces and arrows. result instead of implicit returns. The language reads almost like structured prose.
+Heluna uses English keywords where most languages use symbols. `through` instead of `|>`. `and` instead of `&&`. `match...when...then...end` instead of curly braces and arrows. `result` instead of implicit returns. The language reads almost like structured prose.
+
+This principle extends to operators: `mod` for the remainder operation (instead of `%`), `or else` for null coalescing (instead of `??`), and `is` for type testing (instead of `typeof` or `instanceof`). Each reads as a natural English phrase — `$quantity mod 10`, `$title or else "Untitled"`, `$value is integer`.
 
 This is a deliberate choice for LLM collaboration. An LLM encountering Heluna for the first time in a context window can infer the meaning of most constructs from the keywords alone.
 
@@ -81,6 +83,12 @@ Pattern matching, boolean expressions, and the type system are identical in the 
 
 ### No Null
 There is no null in Heluna. Optional values are expressed through the maybe type, and absence is represented by nothing. Pattern matching makes handling optional values explicit — you must account for the nothing case. This eliminates an entire class of bugs where unexpected nulls cascade through a program.
+
+Two additional operators support working with optional and polymorphic values:
+
+**`or else` (coalesce).** The expression `$title or else "Untitled"` evaluates the left side and, if it produces `nothing`, falls back to the right side. This replaces the common `??` or `||` coalesce pattern from other languages. It exists because the most frequent `maybe` pattern — "use a default if absent" — should not require a full `match` expression. `match` remains available for complex cases; `or else` handles the simple ones concisely.
+
+**`is` (type testing).** The expression `$value is integer` returns a boolean indicating whether the value has the given type. This is useful in conditionals and guards where you need to check a value's type before operating on it. The supported type keywords are `string`, `integer`, `float`, `boolean`, `nothing`, `list`, and `record`. Unlike pattern matching, `is` does not bind or destructure — it is purely a predicate.
 
 ### No Shadowing
 Every variable binding within a function must have a unique name. You cannot reuse a name to mean something different later. This prevents subtle bugs — both from human programmers and from LLMs — where a variable silently changes meaning partway through a function.
