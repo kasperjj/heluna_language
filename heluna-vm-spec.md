@@ -502,7 +502,122 @@ Tag propagation depends on the `tag_mode` flag in the instruction:
 
 These are used in edge cases where the compiler needs explicit tag control beyond the automatic propagation handled by the `tag_mode` flag. Most instructions never need these — the flags byte handles the common case.
 
-### 4.17 Opcode Table Summary
+### 4.17 Superinstructions
+
+Superinstructions fuse common multi-instruction sequences into single opcodes,
+eliminating dispatch overhead. All superinstructions are semantically equivalent
+to their expanded sequences — a conforming VM may execute the expanded form instead.
+
+#### RECORD_GET_C (0xC1)
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | opcode | 0xC1 |
+| 1 | flags | type_hint ∣ tag_mode |
+| 2–3 | dest | scratchpad slot for result |
+| 4–5 | operand1 | scratchpad slot of record |
+| 6–7 | operand2 | constant pool index of key string |
+
+`values[dest] = values[operand1].get(constants[operand2])`
+
+Equivalent to: `LOAD_CONST tmp, operand2; RECORD_GET dest, operand1, tmp`
+Tag behavior: propagate from record slot.
+
+#### RECORD_SET_C (0xC2)
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | opcode | 0xC2 |
+| 1 | flags | type_hint ∣ tag_mode |
+| 2–3 | dest | scratchpad slot of record (modified in place) |
+| 4–5 | operand1 | constant pool index of key string |
+| 6–7 | operand2 | scratchpad slot of value |
+
+`values[dest].set(constants[operand1], values[operand2])`
+
+Equivalent to: `LOAD_CONST tmp, operand1; RECORD_SET dest, tmp, operand2`
+Tag behavior: dest tags |= operand2 tags.
+
+#### RECORD_NEW_SET_C (0xC3)
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | opcode | 0xC3 |
+| 1 | flags | type_hint ∣ tag_mode |
+| 2–3 | dest | scratchpad slot for new record |
+| 4–5 | operand1 | constant pool index of key string |
+| 6–7 | operand2 | scratchpad slot of value |
+
+`values[dest] = new_record(); values[dest].set(constants[operand1], values[operand2])`
+
+Equivalent to: `RECORD_NEW dest; LOAD_CONST tmp, operand1; RECORD_SET dest, tmp, operand2`
+Tag behavior: propagate from value slot.
+
+#### STDLIB_CALL_1 (0xC4)
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | opcode | 0xC4 |
+| 1 | flags | type_hint ∣ tag_mode |
+| 2–3 | dest | scratchpad slot for result |
+| 4–5 | operand1 | stdlib function ID |
+| 6–7 | operand2 | scratchpad slot of value argument |
+
+`values[dest] = stdlib_call(operand1, {value: values[operand2]})`
+
+Equivalent to: `RECORD_NEW tmp; LOAD_CONST k, "value"; RECORD_SET tmp, k, operand2; STDLIB_CALL dest, operand1, tmp`
+Tag behavior: determined by flags tag_mode (typically PROPAGATE from value slot, or CLEAR for sanitizers).
+
+#### CMP_JUMP_EQ (0xC5)
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | opcode | 0xC5 |
+| 1 | flags | type_hint ∣ tag_mode |
+| 2–3 | dest | jump target (instruction index) |
+| 4–5 | operand1 | scratchpad slot of left operand |
+| 6–7 | operand2 | scratchpad slot of right operand |
+
+Jump to `dest` if `values[operand1] != values[operand2]` (i.e., when EQ is **false**).
+
+Equivalent to: `EQ tmp, operand1, operand2; JUMP_IF_NOT dest, tmp`
+Tag behavior: no value written, no tag changes.
+
+#### CMP_JUMP_NEQ (0xC6)
+Same encoding as CMP_JUMP_EQ. Jump to `dest` if `values[operand1] == values[operand2]` (i.e., when NEQ is **false**).
+
+Equivalent to: `NEQ tmp, operand1, operand2; JUMP_IF_NOT dest, tmp`
+
+#### CMP_JUMP_LT (0xC7)
+Same encoding. Jump to `dest` if `values[operand1] >= values[operand2]` (i.e., when LT is **false**).
+
+Equivalent to: `LT tmp, operand1, operand2; JUMP_IF_NOT dest, tmp`
+
+#### CMP_JUMP_GT (0xC8)
+Same encoding. Jump to `dest` if `values[operand1] <= values[operand2]` (i.e., when GT is **false**).
+
+Equivalent to: `GT tmp, operand1, operand2; JUMP_IF_NOT dest, tmp`
+
+#### CMP_JUMP_LTE (0xC9)
+Same encoding. Jump to `dest` if `values[operand1] > values[operand2]` (i.e., when LTE is **false**).
+
+Equivalent to: `LTE tmp, operand1, operand2; JUMP_IF_NOT dest, tmp`
+
+#### CMP_JUMP_GTE (0xCA)
+Same encoding. Jump to `dest` if `values[operand1] < values[operand2]` (i.e., when GTE is **false**).
+
+Equivalent to: `GTE tmp, operand1, operand2; JUMP_IF_NOT dest, tmp`
+
+#### IS_NOTHING_JUMP (0xCB)
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | opcode | 0xCB |
+| 1 | flags | unused |
+| 2–3 | dest | jump target (instruction index) |
+| 4–5 | operand1 | scratchpad slot to test |
+| 6–7 | operand2 | unused |
+
+Jump to `dest` if `values[operand1]` is nothing.
+
+Equivalent to: `IS_NOTHING tmp, operand1; JUMP_IF dest, tmp`
+Tag behavior: no value written, no tag changes.
+
+### 4.18 Opcode Table Summary
 
 | Range | Category | Count |
 |-------|----------|-------|
@@ -520,9 +635,10 @@ These are used in edge cases where the compiler needs explicit tag control beyon
 | `0x90–0x91` | Iteration | 2 |
 | `0xA0` | Standard library dispatch | 1 |
 | `0xB0–0xB1` | Tag operations | 2 |
-| | **Total** | **48** |
+| `0xC1–0xCB` | Superinstructions | 11 |
+| | **Total** | **59** |
 
-Opcode IDs `0xC0–0xFF` are reserved for future use. A VM encountering an unknown opcode must halt execution with an error.
+Opcode IDs `0xCC–0xFF` are reserved for future use. A VM encountering an unknown opcode must halt execution with an error.
 
 ---
 
@@ -1039,6 +1155,19 @@ STDLIB DISPATCH
 TAG OPERATIONS
   0xB0  TAG_SET          slot  tags_const —
   0xB1  TAG_CHECK        dest  source     tags_const
+
+SUPERINSTRUCTIONS
+  0xC1  RECORD_GET_C       dest = record[const_key]
+  0xC2  RECORD_SET_C       record[const_key] = value
+  0xC3  RECORD_NEW_SET_C   dest = { const_key: value }
+  0xC4  STDLIB_CALL_1      dest = stdlib(func, {value: slot})
+  0xC5  CMP_JUMP_EQ        jump if !(op1 == op2)
+  0xC6  CMP_JUMP_NEQ       jump if !(op1 != op2)
+  0xC7  CMP_JUMP_LT        jump if !(op1 < op2)
+  0xC8  CMP_JUMP_GT        jump if !(op1 > op2)
+  0xC9  CMP_JUMP_LTE       jump if !(op1 <= op2)
+  0xCA  CMP_JUMP_GTE       jump if !(op1 >= op2)
+  0xCB  IS_NOTHING_JUMP    jump if op1 is nothing
 ```
 
 ---

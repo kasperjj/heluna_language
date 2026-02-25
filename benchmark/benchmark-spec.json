@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "description": "Heluna VM benchmark suite",
+  "data_generator": "data/generate.py",
+  "benchmarks": [
+    {
+      "name": "arithmetic-tiny",
+      "packet": "packets/bench-arithmetic.hlna",
+      "data": "data/tiny.json",
+      "warmup": 1000,
+      "iterations": 50000,
+      "mode": "latency"
+    },
+    {
+      "name": "arithmetic-medium",
+      "packet": "packets/bench-arithmetic.hlna",
+      "data": "data/medium.json",
+      "warmup": 100,
+      "iterations": 1000,
+      "mode": "throughput"
+    },
+    {
+      "name": "strings-medium",
+      "packet": "packets/bench-strings.hlna",
+      "data": "data/medium.json",
+      "warmup": 100,
+      "iterations": 1000,
+      "mode": "throughput"
+    },
+    {
+      "name": "lists-medium",
+      "packet": "packets/bench-lists.hlna",
+      "data": "data/medium.json",
+      "warmup": 100,
+      "iterations": 1000,
+      "mode": "throughput"
+    },
+    {
+      "name": "mixed-medium",
+      "packet": "packets/bench-mixed.hlna",
+      "data": "data/medium.json",
+      "warmup": 100,
+      "iterations": 1000,
+      "mode": "throughput"
+    },
+    {
+      "name": "mixed-large",
+      "packet": "packets/bench-mixed.hlna",
+      "data": "data/large.json",
+      "warmup": 10,
+      "iterations": 100,
+      "mode": "throughput"
+    }
+  ]
+}

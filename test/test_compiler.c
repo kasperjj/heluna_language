@@ -395,7 +395,7 @@ static void test_if_else(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(find_instr(&compiler, OP_JUMP_IF_NOT) >= 0, "JUMP_IF_NOT for if");
+    ASSERT(find_instr(&compiler, OP_CMP_JUMP_GT) >= 0, "CMP_JUMP_GT for if");
     ASSERT(find_instr(&compiler, OP_JUMP) >= 0, "JUMP for else");
     TEARDOWN();
 }
@@ -412,9 +412,9 @@ static void test_match_literal(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(find_instr(&compiler, OP_EQ) >= 0, "EQ for literal pattern");
-    ASSERT(count_instr(&compiler, OP_JUMP_IF_NOT) >= 2,
-           "JUMP_IF_NOT for each when clause");
+    ASSERT(find_instr(&compiler, OP_CMP_JUMP_EQ) >= 0, "CMP_JUMP_EQ for literal pattern");
+    ASSERT(count_instr(&compiler, OP_CMP_JUMP_EQ) >= 2,
+           "CMP_JUMP_EQ for each when clause");
     TEARDOWN();
 }
 
@@ -491,15 +491,18 @@ static void test_record_new(void) {
     COMPILE(
         "contract t\n"
         "  input x as integer end\n"
-        "  output y as integer end\n"
+        "  output\n"
+        "    y as integer,\n"
+        "    z as integer\n"
+        "  end\n"
         "end\n"
         "define t with input\n"
-        "  result { y: $x }\n"
+        "  result { y: $x, z: $x }\n"
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(find_instr(&compiler, OP_RECORD_NEW) >= 0, "RECORD_NEW emitted");
-    ASSERT(find_instr(&compiler, OP_RECORD_SET) >= 0, "RECORD_SET emitted");
+    ASSERT(find_instr(&compiler, OP_RECORD_NEW_SET_C) >= 0, "RECORD_NEW_SET_C emitted");
+    ASSERT(find_instr(&compiler, OP_RECORD_SET_C) >= 0, "RECORD_SET_C emitted");
     TEARDOWN();
 }
 
@@ -551,7 +554,7 @@ static void test_stdlib_call(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(find_instr(&compiler, OP_STDLIB_CALL) >= 0, "STDLIB_CALL emitted");
+    ASSERT(find_instr(&compiler, OP_STDLIB_CALL_1) >= 0, "STDLIB_CALL_1 emitted");
     /* Check stdlib deps tracking */
     int found_upper = 0;
     for (int i = 0; i < compiler.stdlib_dep_count; i++) {
@@ -764,8 +767,8 @@ static void test_through_call(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(count_instr(&compiler, OP_STDLIB_CALL) == 2,
-           "2 STDLIB_CALL for trim+lower");
+    ASSERT(count_instr(&compiler, OP_STDLIB_CALL_1) == 2,
+           "2 STDLIB_CALL_1 for trim+lower");
     TEARDOWN();
 }
 
@@ -784,7 +787,7 @@ static void test_record_access(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(find_instr(&compiler, OP_RECORD_GET) >= 0, "RECORD_GET emitted");
+    ASSERT(find_instr(&compiler, OP_RECORD_GET_C) >= 0, "RECORD_GET_C emitted");
     TEARDOWN();
 }
 
@@ -817,7 +820,7 @@ static void test_call_empty_record(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    ASSERT(find_instr(&compiler, OP_STDLIB_CALL) >= 0, "STDLIB_CALL emitted");
+    ASSERT(find_instr(&compiler, OP_STDLIB_CALL_1) >= 0, "STDLIB_CALL_1 emitted");
     TEARDOWN();
 }
 
@@ -879,8 +882,8 @@ static void test_sanitizer_clear_tag_mode(void) {
         "end\n"
     );
     ASSERT(packet.data != NULL, "packet produced");
-    int idx = find_instr(&compiler, OP_STDLIB_CALL);
-    ASSERT(idx >= 0, "STDLIB_CALL emitted");
+    int idx = find_instr(&compiler, OP_STDLIB_CALL_1);
+    ASSERT(idx >= 0, "STDLIB_CALL_1 emitted");
     if (idx >= 0) {
         uint8_t tm = (compiler.instructions[idx].flags >> 3) & 0x03;
         ASSERT(tm == TMODE_CLEAR, "tag mode is CLEAR for sanitizer");
@@ -998,8 +1001,8 @@ static void test_sanitizer_using_stdlib_compile(void) {
     );
     ASSERT(packet.data != NULL, "using-stdlib: packet produced");
     /* hash using sha256 → should resolve to stdlib sha256 (0x0070) */
-    int idx = find_instr(&compiler, OP_STDLIB_CALL);
-    ASSERT(idx >= 0, "using-stdlib: STDLIB_CALL emitted");
+    int idx = find_instr(&compiler, OP_STDLIB_CALL_1);
+    ASSERT(idx >= 0, "using-stdlib: STDLIB_CALL_1 emitted");
     if (idx >= 0) {
         ASSERT(compiler.instructions[idx].operand1 == 0x0070,
                "using-stdlib: func_id is sha256 (0x0070)");

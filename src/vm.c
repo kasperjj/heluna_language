@@ -1598,6 +1598,217 @@ HVal *vm_execute(Vm *vm, HVal *input) {
             break;
         }
 
+        /* ── Superinstructions ── */
+
+        case OP_RECORD_GET_C: {
+            HVal *rec = vm->scratchpad[o1].value;
+            HVal *key_val = (o2 < (uint16_t)pkt->constant_count)
+                ? pkt->constants[o2].value : NULL;
+
+            if (!rec || rec->kind != VAL_RECORD || !key_val ||
+                key_val->kind != VAL_STRING) {
+                vm->scratchpad[d].value = vm->val_nothing;
+                vm->scratchpad[d].tags = 0;
+            } else {
+                HField *f = record_get_field(rec, key_val->as.string_val);
+                if (f) {
+                    vm->scratchpad[d].value = f->value;
+                    vm->scratchpad[d].tags = vm->scratchpad[o1].tags;
+                } else {
+                    vm->scratchpad[d].value = vm->val_nothing;
+                    vm->scratchpad[d].tags = 0;
+                }
+            }
+            result_slot = d;
+            break;
+        }
+
+        case OP_RECORD_SET_C: {
+            HVal *rec = vm->scratchpad[d].value;
+            HVal *key_val = (o1 < (uint16_t)pkt->constant_count)
+                ? pkt->constants[o1].value : NULL;
+            HVal *val = vm->scratchpad[o2].value;
+
+            if (!rec || rec->kind != VAL_RECORD) {
+                vm_error(vm, "RECORD_SET_C: dest is not a record");
+                return NULL;
+            }
+            if (!key_val || key_val->kind != VAL_STRING) {
+                vm_error(vm, "RECORD_SET_C: key is not a string");
+                return NULL;
+            }
+
+            const char *key = key_val->as.string_val;
+            HField *existing = NULL;
+            for (HField *f = rec->as.record_fields; f; f = f->next) {
+                if (strcmp(f->name, key) == 0) {
+                    existing = f;
+                    break;
+                }
+            }
+
+            if (existing) {
+                existing->value = val;
+            } else {
+                HField *nf = arena_calloc(arena, sizeof(HField));
+                nf->name  = key;
+                nf->value = val;
+                ensure_slot_tails(vm, sp_size);
+                if (vm->slot_tails[d].record_tail) {
+                    vm->slot_tails[d].record_tail->next = nf;
+                } else if (!rec->as.record_fields) {
+                    rec->as.record_fields = nf;
+                } else {
+                    HField *last = rec->as.record_fields;
+                    while (last->next) last = last->next;
+                    last->next = nf;
+                }
+                vm->slot_tails[d].record_tail = nf;
+            }
+
+            vm->scratchpad[d].tags |= vm->scratchpad[o2].tags;
+            result_slot = d;
+            break;
+        }
+
+        case OP_RECORD_NEW_SET_C: {
+            HVal *key_val = (o1 < (uint16_t)pkt->constant_count)
+                ? pkt->constants[o1].value : NULL;
+            HVal *val = vm->scratchpad[o2].value;
+
+            if (!key_val || key_val->kind != VAL_STRING) {
+                vm_error(vm, "RECORD_NEW_SET_C: key is not a string");
+                return NULL;
+            }
+
+            HField *nf = arena_calloc(arena, sizeof(HField));
+            nf->name  = key_val->as.string_val;
+            nf->value = val;
+
+            vm->scratchpad[d].value = make_record(arena, nf);
+            vm->scratchpad[d].tags = vm->scratchpad[o2].tags;
+            ensure_slot_tails(vm, sp_size);
+            vm->slot_tails[d].record_tail = nf;
+            result_slot = d;
+            break;
+        }
+
+        case OP_STDLIB_CALL_1: {
+            HVal *val = vm->scratchpad[o2].value;
+            if (o1 == 0) {
+                /* Sanitizer passthrough */
+                vm->scratchpad[d].value = val ? val : vm->val_nothing;
+                vm->scratchpad[d].tags = 0;
+                propagate_tags(vm, d, ins, vm->scratchpad[o2].tags);
+            } else {
+                /* Build temporary {value: val} record */
+                HField *vf = arena_calloc(arena, sizeof(HField));
+                vf->name  = "value";
+                vf->value = val;
+                HVal *arg_rec = make_record(arena, vf);
+
+                HelunaError serr = {0};
+                HVal *ret = vm_stdlib_call(o1, arg_rec, arena, &serr);
+                if (!ret && serr.kind != HELUNA_OK) {
+                    vm->error = serr;
+                    vm->had_error = 1;
+                    return NULL;
+                }
+                vm->scratchpad[d].value = ret ? ret : vm->val_nothing;
+                vm->scratchpad[d].tags = 0;
+                propagate_tags(vm, d, ins, vm->scratchpad[o2].tags);
+            }
+            result_slot = d;
+            break;
+        }
+
+        case OP_CMP_JUMP_EQ: {
+            HVal *a = vm->scratchpad[o1].value;
+            HVal *b = vm->scratchpad[o2].value;
+            if (!hval_equal(a, b)) { pc = d; continue; }
+            break;
+        }
+
+        case OP_CMP_JUMP_NEQ: {
+            HVal *a = vm->scratchpad[o1].value;
+            HVal *b = vm->scratchpad[o2].value;
+            if (hval_equal(a, b)) { pc = d; continue; }
+            break;
+        }
+
+        case OP_CMP_JUMP_LT: {
+            HVal *a = vm->scratchpad[o1].value;
+            HVal *b = vm->scratchpad[o2].value;
+            if (!a || !b) { vm_error(vm, "CMP_JUMP_LT: null operand"); return NULL; }
+            if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
+                (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
+                if (!(to_double(a) < to_double(b))) { pc = d; continue; }
+            } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
+                if (!(strcmp(a->as.string_val, b->as.string_val) < 0)) { pc = d; continue; }
+            } else {
+                vm_error(vm, "CMP_JUMP_LT: incompatible types");
+                return NULL;
+            }
+            break;
+        }
+
+        case OP_CMP_JUMP_GT: {
+            HVal *a = vm->scratchpad[o1].value;
+            HVal *b = vm->scratchpad[o2].value;
+            if (!a || !b) { vm_error(vm, "CMP_JUMP_GT: null operand"); return NULL; }
+            if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
+                (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
+                if (!(to_double(a) > to_double(b))) { pc = d; continue; }
+            } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
+                if (!(strcmp(a->as.string_val, b->as.string_val) > 0)) { pc = d; continue; }
+            } else {
+                vm_error(vm, "CMP_JUMP_GT: incompatible types");
+                return NULL;
+            }
+            break;
+        }
+
+        case OP_CMP_JUMP_LTE: {
+            HVal *a = vm->scratchpad[o1].value;
+            HVal *b = vm->scratchpad[o2].value;
+            if (!a || !b) { vm_error(vm, "CMP_JUMP_LTE: null operand"); return NULL; }
+            if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
+                (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
+                if (!(to_double(a) <= to_double(b))) { pc = d; continue; }
+            } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
+                if (!(strcmp(a->as.string_val, b->as.string_val) <= 0)) { pc = d; continue; }
+            } else {
+                vm_error(vm, "CMP_JUMP_LTE: incompatible types");
+                return NULL;
+            }
+            break;
+        }
+
+        case OP_CMP_JUMP_GTE: {
+            HVal *a = vm->scratchpad[o1].value;
+            HVal *b = vm->scratchpad[o2].value;
+            if (!a || !b) { vm_error(vm, "CMP_JUMP_GTE: null operand"); return NULL; }
+            if ((a->kind == VAL_INTEGER || a->kind == VAL_FLOAT) &&
+                (b->kind == VAL_INTEGER || b->kind == VAL_FLOAT)) {
+                if (!(to_double(a) >= to_double(b))) { pc = d; continue; }
+            } else if (a->kind == VAL_STRING && b->kind == VAL_STRING) {
+                if (!(strcmp(a->as.string_val, b->as.string_val) >= 0)) { pc = d; continue; }
+            } else {
+                vm_error(vm, "CMP_JUMP_GTE: incompatible types");
+                return NULL;
+            }
+            break;
+        }
+
+        case OP_IS_NOTHING_JUMP: {
+            HVal *a = vm->scratchpad[o1].value;
+            if (!a || a->kind == VAL_NOTHING) {
+                pc = d;
+                continue;
+            }
+            break;
+        }
+
         default:
             vm_error(vm, "unknown opcode 0x%02X at PC=%d", ins->opcode, pc);
             return NULL;

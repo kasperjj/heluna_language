@@ -1,0 +1,39 @@
+# Benchmark: arithmetic-heavy workload
+# Focus: filter, map, fold(add), arithmetic, type conversion, comparisons
+
+contract bench-arithmetic
+  input
+    records as list of record
+      id as integer, name as string, email as string,
+      age as integer, score as float, active as boolean,
+      department as string, salary as float
+    end
+  end
+
+  output
+    active-count as integer,
+    total-salary as float,
+    avg-score as float,
+    total-adjusted as float,
+    record-count as integer
+  end
+end
+
+define bench-arithmetic with input
+  let active-recs be filter $records where r r.active = true end
+  let active-count-val be length({ list: active-recs })
+  let salaries be map active-recs as r do r.salary end
+  let total-salary-val be fold({ list: salaries, initial: 0.0, fn: "add" })
+  let scores be map active-recs as r do r.score end
+  let score-sum be fold({ list: scores, initial: 0.0, fn: "add" })
+  let avg-score-val be score-sum / to-float({ value: active-count-val })
+  let adjusted be map active-recs as r do r.salary * 0.7 end
+  let total-adj be fold({ list: adjusted, initial: 0.0, fn: "add" })
+  result {
+    active-count: active-count-val,
+    total-salary: total-salary-val,
+    avg-score: avg-score-val,
+    total-adjusted: total-adj,
+    record-count: length({ list: $records })
+  }
+end

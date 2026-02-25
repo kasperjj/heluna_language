@@ -106,6 +106,19 @@
 /* Source lookup */
 #define OP_SOURCE_LOOKUP     0xC0
 
+/* Superinstructions */
+#define OP_RECORD_GET_C      0xC1
+#define OP_RECORD_SET_C      0xC2
+#define OP_RECORD_NEW_SET_C  0xC3
+#define OP_STDLIB_CALL_1     0xC4
+#define OP_CMP_JUMP_EQ       0xC5
+#define OP_CMP_JUMP_NEQ      0xC6
+#define OP_CMP_JUMP_LT       0xC7
+#define OP_CMP_JUMP_GT       0xC8
+#define OP_CMP_JUMP_LTE      0xC9
+#define OP_CMP_JUMP_GTE      0xCA
+#define OP_IS_NOTHING_JUMP   0xCB
+
 /* ── Type hint values (flags byte bits 0-2) ──────────────── */
 
 #define THINT_UNSPECIFIED    0

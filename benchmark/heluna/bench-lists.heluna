@@ -1,0 +1,40 @@
+# Benchmark: list operation-heavy workload
+# Focus: sort, sort-by, unique, reverse, slice, range, filter, length
+
+contract bench-lists
+  input
+    records as list of record
+      id as integer, name as string, email as string,
+      age as integer, score as float, active as boolean,
+      department as string, salary as float
+    end
+  end
+
+  output
+    sorted-count as integer,
+    unique-dept-count as integer,
+    top-ten-count as integer,
+    active-count as integer,
+    reversed-count as integer,
+    range-sum as integer
+  end
+end
+
+define bench-lists with input
+  let sorted-recs be sort-by({ list: $records, field: "score" })
+  let departments be map $records as r do r.department end
+  let unique-depts be unique({ list: departments })
+  let reversed-recs be reverse({ list: sorted-recs })
+  let top-ten be slice({ list: sorted-recs, start: 0, end: 10 })
+  let active-recs be filter $records where r r.active = true end
+  let idx-range be range({ start: 1, end: 100 })
+  let range-total be fold({ list: idx-range, initial: 0, fn: "add" })
+  result {
+    sorted-count: length({ list: sorted-recs }),
+    unique-dept-count: length({ list: unique-depts }),
+    top-ten-count: length({ list: top-ten }),
+    active-count: length({ list: active-recs }),
+    reversed-count: length({ list: reversed-recs }),
+    range-sum: range-total
+  }
+end

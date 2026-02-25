@@ -877,23 +877,25 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
     }
 
     case EXPR_RECORD: {
-        emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-             dest, 0, 0);
-
-        for (AstLabel *l = e->as.record.labels; l; l = l->next) {
-            /* Load key string constant */
+        AstLabel *l = e->as.record.labels;
+        if (l) {
+            /* First field: fuse RECORD_NEW + key load + set */
             int klen = (int)strlen(l->name);
             uint16_t key_ci = add_const_string(c, l->name, klen);
-            uint16_t key_slot = scratch_alloc(c);
-            emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
-                 key_slot, key_ci, 0);
-
-            /* Compile value */
             CompileResult val = compile_expr(c, l->value, -1);
-
-            /* Set field */
-            emit(c, OP_RECORD_SET, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                 dest, key_slot, val.slot);
+            emit(c, OP_RECORD_NEW_SET_C, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                 dest, key_ci, val.slot);
+            l = l->next;
+        } else {
+            emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                 dest, 0, 0);
+        }
+        for (; l; l = l->next) {
+            int klen = (int)strlen(l->name);
+            uint16_t key_ci = add_const_string(c, l->name, klen);
+            CompileResult val = compile_expr(c, l->value, -1);
+            emit(c, OP_RECORD_SET_C, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                 dest, key_ci, val.slot);
         }
         r.slot = dest;
         r.type = CTYPE_RECORD;
@@ -918,11 +920,8 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
         CompileResult obj = compile_expr(c, e->as.access.object, -1);
         int flen = (int)strlen(e->as.access.field);
         uint16_t key_ci = add_const_string(c, e->as.access.field, flen);
-        uint16_t key_slot = scratch_alloc(c);
-        emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
-             key_slot, key_ci, 0);
-        emit(c, OP_RECORD_GET, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
-             dest, obj.slot, key_slot);
+        emit(c, OP_RECORD_GET_C, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
+             dest, obj.slot, key_ci);
         r.slot = dest;
         r.type = CTYPE_UNKNOWN;
         break;
@@ -949,12 +948,9 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
 
             /* Extract "value" field from arg */
             uint16_t vkey_ci = add_const_string(c, "value", 5);
-            uint16_t vkey_slot = scratch_alloc(c);
-            emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
-                 vkey_slot, vkey_ci, 0);
             uint16_t val_slot = scratch_alloc(c);
-            emit(c, OP_RECORD_GET, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
-                 val_slot, arg.slot, vkey_slot);
+            emit(c, OP_RECORD_GET_C, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
+                 val_slot, arg.slot, vkey_ci);
 
             /* Apply conversion opcode */
             uint16_t conv_slot = scratch_alloc(c);
@@ -979,10 +975,8 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
             /* to-string wraps result in { value: result } record (evaluator does this);
              * to-float and to-integer return bare values (evaluator returns bare). */
             if (strcmp(name, "to-string") == 0) {
-                emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                     dest, 0, 0);
-                emit(c, OP_RECORD_SET, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                     dest, vkey_slot, conv_slot);
+                emit(c, OP_RECORD_NEW_SET_C, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                     dest, vkey_ci, conv_slot);
                 r.slot = dest;
                 r.type = CTYPE_RECORD;
             } else {
@@ -1055,27 +1049,44 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
 
         /* Generic call: sanitizer / stdlib / uses-dep via 4-step resolve */
         CallResolution cr = resolve_call(c, name);
-        CompileResult arg = compile_expr(c, e->as.call.arg, -1);
 
-        if (cr.is_stdlib) {
+        /* STDLIB_CALL_1 optimization: single {value: X} arg to stdlib */
+        if (cr.is_stdlib &&
+            e->as.call.arg && e->as.call.arg->kind == EXPR_RECORD &&
+            e->as.call.arg->as.record.labels &&
+            !e->as.call.arg->as.record.labels->next &&
+            strcmp(e->as.call.arg->as.record.labels->name, "value") == 0) {
+            CompileResult val = compile_expr(c,
+                e->as.call.arg->as.record.labels->value, -1);
             track_stdlib(c, cr.func_id);
-            emit(c, OP_STDLIB_CALL,
+            emit(c, OP_STDLIB_CALL_1,
                  make_flags(THINT_UNSPECIFIED, cr.tag_mode),
-                 dest, cr.func_id, arg.slot);
+                 dest, cr.func_id, val.slot);
             r.slot = dest;
             r.type = CTYPE_UNKNOWN;
-        } else if (cr.is_inline) {
-            r = compile_inline_call(c, cr.inline_dep, arg, dest);
-            /* Apply sanitizer tag clearing if needed */
-            if (cr.is_sanitizer) {
-                emit(c, OP_TAG_SET, make_flags(THINT_UNSPECIFIED, TMODE_CLEAR),
-                     r.slot, 0, 0);
-            }
         } else {
-            add_error(c, HELUNA_ERR_CONTRACT, e->loc,
-                      "unresolved function '%s'", name);
-            r.slot = dest;
-            r.type = CTYPE_UNKNOWN;
+            CompileResult arg = compile_expr(c, e->as.call.arg, -1);
+
+            if (cr.is_stdlib) {
+                track_stdlib(c, cr.func_id);
+                emit(c, OP_STDLIB_CALL,
+                     make_flags(THINT_UNSPECIFIED, cr.tag_mode),
+                     dest, cr.func_id, arg.slot);
+                r.slot = dest;
+                r.type = CTYPE_UNKNOWN;
+            } else if (cr.is_inline) {
+                r = compile_inline_call(c, cr.inline_dep, arg, dest);
+                /* Apply sanitizer tag clearing if needed */
+                if (cr.is_sanitizer) {
+                    emit(c, OP_TAG_SET, make_flags(THINT_UNSPECIFIED, TMODE_CLEAR),
+                         r.slot, 0, 0);
+                }
+            } else {
+                add_error(c, HELUNA_ERR_CONTRACT, e->loc,
+                          "unresolved function '%s'", name);
+                r.slot = dest;
+                r.type = CTYPE_UNKNOWN;
+            }
         }
         break;
     }
@@ -1154,20 +1165,6 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
         const AstExpr *right = e->as.through.right;
 
         if (right->kind == EXPR_CALL) {
-            /* Compile the call's arg record, then inject left as "value" field */
-            CompileResult arg = compile_expr(c, right->as.call.arg, -1);
-
-            /* Load "value" key */
-            uint16_t key_ci = add_const_string(c, "value", 5);
-            uint16_t key_slot = scratch_alloc(c);
-            emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
-                 key_slot, key_ci, 0);
-
-            /* Set value field on the arg record */
-            emit(c, OP_RECORD_SET, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                 arg.slot, key_slot, left.slot);
-
-            /* Now look up the function */
             const char *fn_name = right->as.call.name;
 
             /* Conversion functions: through pipeline injects "value" field,
@@ -1185,10 +1182,9 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
                      conv_slot, left.slot, 0);
 
                 /* Wrap in { value: result } record */
-                emit(c, OP_RECORD_NEW, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                     dest, 0, 0);
-                emit(c, OP_RECORD_SET, make_flags(THINT_RECORD, TMODE_PROPAGATE),
-                     dest, key_slot, conv_slot);
+                uint16_t vkey_ci = add_const_string(c, "value", 5);
+                emit(c, OP_RECORD_NEW_SET_C, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                     dest, vkey_ci, conv_slot);
 
                 r.slot = dest;
                 r.type = CTYPE_RECORD;
@@ -1198,24 +1194,45 @@ static CompileResult compile_expr(Compiler *c, const AstExpr *e, int target) {
             /* Resolve via 4-step cascade */
             CallResolution cr = resolve_call(c, fn_name);
 
-            if (cr.is_stdlib) {
+            /* STDLIB_CALL_1 optimization: empty arg record means only {value: left} */
+            if (cr.is_stdlib &&
+                right->as.call.arg &&
+                right->as.call.arg->kind == EXPR_RECORD &&
+                right->as.call.arg->as.record.labels == NULL) {
                 track_stdlib(c, cr.func_id);
-                emit(c, OP_STDLIB_CALL,
+                emit(c, OP_STDLIB_CALL_1,
                      make_flags(THINT_UNSPECIFIED, cr.tag_mode),
-                     dest, cr.func_id, arg.slot);
+                     dest, cr.func_id, left.slot);
                 r.slot = dest;
                 r.type = CTYPE_UNKNOWN;
-            } else if (cr.is_inline) {
-                r = compile_inline_call(c, cr.inline_dep, arg, dest);
-                if (cr.is_sanitizer) {
-                    emit(c, OP_TAG_SET, make_flags(THINT_UNSPECIFIED, TMODE_CLEAR),
-                         r.slot, 0, 0);
-                }
             } else {
-                add_error(c, HELUNA_ERR_CONTRACT, right->loc,
-                          "unresolved function '%s'", fn_name);
-                r.slot = dest;
-                r.type = CTYPE_UNKNOWN;
+                /* Compile the call's arg record, then inject left as "value" field */
+                CompileResult arg = compile_expr(c, right->as.call.arg, -1);
+
+                /* Inject "value" field using RECORD_SET_C */
+                uint16_t key_ci = add_const_string(c, "value", 5);
+                emit(c, OP_RECORD_SET_C, make_flags(THINT_RECORD, TMODE_PROPAGATE),
+                     arg.slot, key_ci, left.slot);
+
+                if (cr.is_stdlib) {
+                    track_stdlib(c, cr.func_id);
+                    emit(c, OP_STDLIB_CALL,
+                         make_flags(THINT_UNSPECIFIED, cr.tag_mode),
+                         dest, cr.func_id, arg.slot);
+                    r.slot = dest;
+                    r.type = CTYPE_UNKNOWN;
+                } else if (cr.is_inline) {
+                    r = compile_inline_call(c, cr.inline_dep, arg, dest);
+                    if (cr.is_sanitizer) {
+                        emit(c, OP_TAG_SET, make_flags(THINT_UNSPECIFIED, TMODE_CLEAR),
+                             r.slot, 0, 0);
+                    }
+                } else {
+                    add_error(c, HELUNA_ERR_CONTRACT, right->loc,
+                              "unresolved function '%s'", fn_name);
+                    r.slot = dest;
+                    r.type = CTYPE_UNKNOWN;
+                }
             }
         } else if (right->kind == EXPR_FILTER) {
             /* Use left slot as source list for filter */
@@ -1538,13 +1555,10 @@ static void compile_pattern_bindings(Compiler *c, const AstPattern *p,
         for (AstFieldPattern *fp = p->as.record.fields; fp; fp = fp->next) {
             int klen = (int)strlen(fp->name);
             uint16_t key_ci = add_const_string(c, fp->name, klen);
-            uint16_t key_slot = scratch_alloc(c);
-            emit(c, OP_LOAD_CONST, make_flags(THINT_STRING, TMODE_PROPAGATE),
-                 key_slot, key_ci, 0);
 
             uint16_t field_slot = scratch_alloc(c);
-            emit(c, OP_RECORD_GET, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
-                 field_slot, subject_slot, key_slot);
+            emit(c, OP_RECORD_GET_C, make_flags(THINT_UNSPECIFIED, TMODE_PROPAGATE),
+                 field_slot, subject_slot, key_ci);
 
             compile_pattern_bindings(c, fp->pattern, field_slot);
         }
@@ -1962,6 +1976,123 @@ static PacketResult assemble_packet(Compiler *c) {
     return result;
 }
 
+/* ── Peephole optimizer ──────────────────────────────────── */
+
+#define NOP_OPCODE 0x00
+
+static int is_jump_target(Compiler *c, int target) {
+    for (int i = 0; i < c->instr_count; i++) {
+        Instruction *ins = &c->instructions[i];
+        switch (ins->opcode) {
+        case OP_JUMP:
+        case OP_JUMP_IF:
+        case OP_JUMP_IF_NOT:
+        case OP_CMP_JUMP_EQ:
+        case OP_CMP_JUMP_NEQ:
+        case OP_CMP_JUMP_LT:
+        case OP_CMP_JUMP_GT:
+        case OP_CMP_JUMP_LTE:
+        case OP_CMP_JUMP_GTE:
+        case OP_IS_NOTHING_JUMP:
+            if (ins->dest == (uint16_t)target) return 1;
+            break;
+        default:
+            break;
+        }
+    }
+    return 0;
+}
+
+static void peephole_optimize(Compiler *c) {
+    /* Pass 1: Fuse patterns */
+    for (int i = 0; i + 1 < c->instr_count; i++) {
+        Instruction *a = &c->instructions[i];
+        Instruction *b = &c->instructions[i + 1];
+
+        /* CMP + JUMP_IF_NOT → CMP_JUMP_xx */
+        if (b->opcode == OP_JUMP_IF_NOT &&
+            a->opcode >= OP_EQ && a->opcode <= OP_GTE &&
+            a->dest == b->operand1 &&
+            !is_jump_target(c, i + 1)) {
+            uint8_t fused_op = OP_CMP_JUMP_EQ + (a->opcode - OP_EQ);
+            a->opcode = fused_op;
+            a->dest = b->dest;    /* jump target */
+            /* a->operand1 and a->operand2 stay (comparison operands) */
+            b->opcode = NOP_OPCODE;
+        }
+
+        /* IS_NOTHING + JUMP_IF → IS_NOTHING_JUMP */
+        if (a->opcode == OP_IS_NOTHING &&
+            b->opcode == OP_JUMP_IF &&
+            a->dest == b->operand1 &&
+            !is_jump_target(c, i + 1)) {
+            a->opcode = OP_IS_NOTHING_JUMP;
+            a->dest = b->dest;    /* jump target */
+            /* a->operand1 stays (source slot) */
+            b->opcode = NOP_OPCODE;
+        }
+    }
+
+    /* Pass 2: Build remap table */
+    int *remap = arena_alloc(c->arena, (size_t)c->instr_count * sizeof(int));
+    int new_count = 0;
+    for (int i = 0; i < c->instr_count; i++) {
+        remap[i] = new_count;
+        if (c->instructions[i].opcode != NOP_OPCODE) {
+            new_count++;
+        }
+    }
+
+    if (new_count == c->instr_count) return; /* nothing to compact */
+
+    /* Pass 3: Remap jump targets */
+    for (int i = 0; i < c->instr_count; i++) {
+        Instruction *ins = &c->instructions[i];
+        if (ins->opcode == NOP_OPCODE) continue;
+
+        switch (ins->opcode) {
+        case OP_JUMP:
+        case OP_JUMP_IF:
+        case OP_JUMP_IF_NOT:
+        case OP_CMP_JUMP_EQ:
+        case OP_CMP_JUMP_NEQ:
+        case OP_CMP_JUMP_LT:
+        case OP_CMP_JUMP_GT:
+        case OP_CMP_JUMP_LTE:
+        case OP_CMP_JUMP_GTE:
+        case OP_IS_NOTHING_JUMP:
+            if (ins->dest < (uint16_t)c->instr_count) {
+                ins->dest = (uint16_t)remap[ins->dest];
+            }
+            break;
+        case OP_ITER_SETUP: {
+            /* Body starts at i+1, body_length is operand2.
+             * Remap body_length based on new positions. */
+            int body_start = i + 1;
+            int body_end = i + 1 + ins->operand2;
+            if (body_end <= c->instr_count) {
+                ins->operand2 = (uint16_t)(remap[body_end] - remap[body_start]);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    /* Pass 4: Compact instruction array */
+    int j = 0;
+    for (int i = 0; i < c->instr_count; i++) {
+        if (c->instructions[i].opcode != NOP_OPCODE) {
+            if (i != j) {
+                c->instructions[j] = c->instructions[i];
+            }
+            j++;
+        }
+    }
+    c->instr_count = new_count;
+}
+
 /* ── Public API ──────────────────────────────────────────── */
 
 void compiler_init(Compiler *c, const AstProgram *prog, Arena *arena) {
@@ -2040,6 +2171,9 @@ PacketResult compiler_compile(Compiler *c) {
     if (c->errors.count > 0) {
         return empty;
     }
+
+    /* Peephole optimization: fuse CMP+JUMP_IF_NOT and IS_NOTHING+JUMP_IF */
+    peephole_optimize(c);
 
     return assemble_packet(c);
 }

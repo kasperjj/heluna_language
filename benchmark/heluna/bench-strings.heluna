@@ -1,0 +1,41 @@
+# Benchmark: string-heavy workload
+# Focus: trim, lower, upper, replace, join, concat
+
+contract bench-strings
+  input
+    records as list of record
+      id as integer, name as string, email as string,
+      age as integer, score as float, active as boolean,
+      department as string, salary as float
+    end
+  end
+
+  output
+    normalized-emails as list of string,
+    formatted-names as list of string,
+    masked-emails as list of string,
+    all-names as string,
+    record-count as integer
+  end
+end
+
+define bench-strings with input
+  let norm-emails be map $records as r do
+    r.email through trim({}) through lower({})
+  end
+  let fmt-names be map $records as r do
+    r.name through trim({}) through upper({})
+  end
+  let masked be map $records as r do
+    replace({ value: r.email through trim({}), find: "@", replacement: "[at]" })
+  end
+  let names-trimmed be map $records as r do r.name through trim({}) end
+  let all-names-val be join({ list: names-trimmed, delimiter: "; " })
+  result {
+    normalized-emails: norm-emails,
+    formatted-names: fmt-names,
+    masked-emails: masked,
+    all-names: all-names-val,
+    record-count: length({ list: $records })
+  }
+end

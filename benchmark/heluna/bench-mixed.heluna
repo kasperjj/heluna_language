@@ -1,0 +1,57 @@
+# Benchmark: realistic mixed workload
+# Focus: arithmetic, strings, lists, conditionals, stdlib
+
+contract bench-mixed
+  input
+    records as list of record
+      id as integer, name as string, email as string,
+      age as integer, score as float, active as boolean,
+      department as string, salary as float
+    end
+  end
+
+  output
+    active-count as integer,
+    total-salary as float,
+    avg-score as float,
+    all-names as string,
+    sorted-count as integer,
+    unique-dept-count as integer,
+    senior-count as integer,
+    top-scorer as string,
+    checksum as string
+  end
+end
+
+define bench-mixed with input
+  let active-recs be filter $records where r r.active = true end
+  let active-count-val be length({ list: active-recs })
+  let salaries be map active-recs as r do r.salary end
+  let total-salary-val be fold({ list: salaries, initial: 0.0, fn: "add" })
+  let scores be map active-recs as r do r.score end
+  let score-sum be fold({ list: scores, initial: 0.0, fn: "add" })
+  let avg-score-val be score-sum / to-float({ value: active-count-val })
+  let names be map active-recs as r do r.name through trim({}) end
+  let all-names-val be join({ list: names, delimiter: "; " })
+  let sorted-recs be sort-by({ list: active-recs, field: "score" })
+  let departments be map $records as r do r.department end
+  let unique-depts be unique({ list: departments })
+  let seniors be filter active-recs where r r.age >= 50 end
+  let top-scorer-val be match sorted-recs
+    when [first, ..rest] then first.name through trim({})
+    when [] then "none"
+  end
+  let checksum-input be to-string({ value: active-count-val }) + ":" + to-string({ value: total-salary-val })
+  let checksum-val be sha256({ value: checksum-input })
+  result {
+    active-count: active-count-val,
+    total-salary: total-salary-val,
+    avg-score: avg-score-val,
+    all-names: all-names-val,
+    sorted-count: length({ list: sorted-recs }),
+    unique-dept-count: length({ list: unique-depts }),
+    senior-count: length({ list: seniors }),
+    top-scorer: top-scorer-val,
+    checksum: checksum-val
+  }
+end
